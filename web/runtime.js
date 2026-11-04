@@ -352,7 +352,8 @@ async function readCarrierResponse(response) {
 /**
  * True ONLY when the response proves no host route owned the path:
  *   - a network error (thrown before we get here), or
- *   - a non-JSON body — the SPA fallback answers text/html.
+ *   - the SPA fallback: an HTML document (text/html, or a body that opens with
+ *     a doctype/<html>), or any non-2xx non-JSON response.
  *
  * Every JSON response is a real answer and must never mark a carrier dead:
  *   - plugin responses, including authentic `{"detail":"…"}` 404/405 bodies,
@@ -360,10 +361,22 @@ async function readCarrierResponse(response) {
  *   - host-side failures are `{"ok":false,"error":"…"}` and surface as errors.
  * A legitimate plugin 404 at a mistyped sub-path must not permanently fall
  * back to the other carrier for the rest of the session.
+ *
+ * A 2xx non-JSON, non-HTML body is also treated as a real plugin answer (a
+ * Hermes backend half could legitimately stream text/plain or a file); the
+ * caller gets the raw text instead of a bogus fallback probe.
  */
+function looksLikeHtmlDocument(result) {
+  if (/html/i.test(result.contentType)) return true
+  const sample = typeof result.text === 'string' ? result.text.trim().slice(0, 256).toLowerCase() : ''
+  return sample.indexOf('<!doctype') === 0 || sample.indexOf('<html') === 0
+}
+
 function isCarrierMiss(result) {
   if (/json/i.test(result.contentType)) return false
   if (result.parsed) return false
+  const status = result.response ? result.response.status : 0
+  if (status >= 200 && status < 300 && !looksLikeHtmlDocument(result)) return false
   return true
 }
 
