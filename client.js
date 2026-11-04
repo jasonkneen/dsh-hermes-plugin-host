@@ -2433,9 +2433,21 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'layout'],
       apply(ctx) {
         try {
-        const layout = ctx.layout || (typeof ctx.get === 'function' ? ctx.get('layout') : undefined)
-        const uiWorkspace = ctx.uiWorkspace || (typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined)
-        const themeService = ctx.theme || (typeof ctx.get === 'function' ? ctx.get('theme') : undefined)
+        /* NEVER read a service as a property unless it is in `inject`: Cordis
+           THROWS ("cannot get property \"uiWorkspace\" without inject") and a
+           throw here aborts activation — which failed the desktop web boot into
+           safe mode. `ctx.get(name)` is the optional-access form and returns
+           undefined when the service is absent. */
+        const optionalService = (serviceName) => {
+          try {
+            return typeof ctx.get === 'function' ? ctx.get(serviceName) : undefined
+          } catch (error) {
+            return undefined
+          }
+        }
+        const layout = optionalService('layout')
+        const uiWorkspace = optionalService('uiWorkspace')
+        const themeService = optionalService('theme')
         const openPanel = (panelId) => {
           try {
             if (layout && typeof layout.selectPanel === 'function') {
