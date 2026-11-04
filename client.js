@@ -1176,15 +1176,33 @@ window.__ModuleLoader__.load({
       return routeMode === 'fallback' ? '/hermes-plugins' : '/api/hermes-plugins'
     }
 
+    /**
+     * The `main` slot's `useSessions` standard prop is a SELECTOR hook
+     * (`SnapshotSelectorHook`: `useSessions(select, equal?) => selected`), not a
+     * plain snapshot getter. Shipped callers all pass one:
+     * `useSessions((s) => s.byId[id]?.cwd)`. Calling it with no argument hands the
+     * hook an `undefined` selector, which throws inside render — and a throw
+     * there is caught by the shell's slot boundary, which ABDICATES the entry
+     * (it shows up as `active: false` in the slot tree) and renders an empty
+     * placeholder. That was the blank Office 3D panel: our panel component
+     * crashed on mount, so nothing inside it (including our own error boundary)
+     * could ever paint.
+     *
+     * So: always pass a selector, and treat its absence defensively for older
+     * shells that might expose a plain getter instead.
+     */
+    function readSessionSnapshot(props) {
+      if (!props || typeof props.useSessions !== 'function') return null
+      try {
+        return props.useSessions((state) => state) ?? null
+      } catch (error) {
+        return null
+      }
+    }
+
     function useSessionBridgeRef(props) {
       const ref = useRef(null)
-      let snapshot = null
-      try {
-        snapshot = props && typeof props.useSessions === 'function' ? props.useSessions() : null
-      } catch (error) {
-        snapshot = null
-      }
-      ref.current = snapshot
+      ref.current = readSessionSnapshot(props)
       useEffect(() => {
         sessionSnapshotRef = ref
         return () => {
@@ -2219,6 +2237,13 @@ window.__ModuleLoader__.load({
 
         const hostBridge = makeHostBridge(uiWorkspace)
 
+        /* A component that throws during render is caught by the SHELL's own slot
+           boundary, which abdicates the entry and paints an empty placeholder —
+           our inner PluginErrorBoundary can never see it, because it lives INSIDE
+           the component that threw. Wrap every registered entry in a boundary as
+           well, so a crash shows its message instead of a blank panel. */
+        const guarded = (element) => h(PluginErrorBoundary, {}, element)
+
         /* Prime the store; the inject callbacks below register from its snapshot
            and re-register on every change, so panels appear without a reload. */
         pluginStore.refresh()
@@ -2230,11 +2255,13 @@ window.__ModuleLoader__.load({
           const register = (item) =>
             ctx.slots.register(
               { name: 'main', key: item.id },
-              (slotProps) => h(PluginPanelHost, Object.assign({}, slotProps, { pluginName: item.name, hostBridge })),
+              (slotProps) =>
+                guarded(h(PluginPanelHost, Object.assign({}, slotProps, { pluginName: item.name, hostBridge }))),
             )
           const management = ctx.slots.register(
             { name: 'main', key: PANEL_ID },
-            (slotProps) => h(HermesPluginsPage, Object.assign({}, slotProps, { store: pluginStore, openPanel })),
+            (slotProps) =>
+              guarded(h(HermesPluginsPage, Object.assign({}, slotProps, { store: pluginStore, openPanel }))),
           )
           const sync = () => syncMainPanels(registered, desiredPanels(pluginStore.getSnapshot()), register)
           sync()
@@ -2264,11 +2291,12 @@ window.__ModuleLoader__.load({
           const register = (item) =>
             ctx.slots.register(
               { name: 'sidebar.panellist', id: item.id, order: item.order, label: item.label },
-              (slotProps) => h(PluginIcon, Object.assign({}, slotProps, { name: item.name, open: () => openPanel(item.id) })),
+              (slotProps) =>
+                guarded(h(PluginIcon, Object.assign({}, slotProps, { name: item.name, open: () => openPanel(item.id) }))),
             )
           const management = ctx.slots.register(
             { name: 'sidebar.panellist', id: ENTRY_ID, order: 30, label: TEXT.title },
-            (slotProps) => h(PanelIcon, Object.assign({}, slotProps, { open: () => openPanel(PANEL_ID) })),
+            (slotProps) => guarded(h(PanelIcon, Object.assign({}, slotProps, { open: () => openPanel(PANEL_ID) }))),
           )
           const sync = () => syncSidebarPanels(registered, desiredPanels(pluginStore.getSnapshot()), register)
           sync()
