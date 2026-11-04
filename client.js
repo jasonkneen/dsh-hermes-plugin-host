@@ -101,6 +101,13 @@ window.__ModuleLoader__.load({
       crash: 'The plugin UI crashed',
       crashHint: 'Its render threw. Use Try again to restart the panel — the rest of the app stays usable.',
       panelMissing: 'This plugin is no longer installed.',
+      details: 'Details',
+      pluginsDirLabel: 'Plugins dir',
+      emptyPanelTitle: 'This plugin rendered an empty page',
+      emptyPanelDetail: (width, height) => `Panel measured ${width}×${height}.`,
+      noRoutesTitle: 'This plugin registered no page.',
+      noRoutesDetail: (id, count) => `Plugin ${id} registered ${count} route(s).`,
+      debugStrip: (id, phase, routes, width, height) => `${id} · ${phase} · ${routes} route(s) · panel ${width}×${height}`,
       badges: {
         backend: 'backend',
         tools: (names) => `tools: ${names.join(', ')}`,
@@ -673,10 +680,10 @@ window.__ModuleLoader__.load({
 .hpx-page{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;overflow-y:auto;
   background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;line-height:1.45}
 .hpx-page *{box-sizing:border-box}
-.hpx-content{width:100%;display:flex;flex-direction:column;padding:40px 40px 48px}
-.hpx-head{display:flex;align-items:flex-start;gap:16px;margin:0 0 24px}
+.hpx-content{width:100%;max-width:1040px;display:flex;flex-direction:column;padding:40px 40px 48px}
+.hpx-head{display:flex;align-items:flex-start;gap:16px;margin:0 0 20px}
 .hpx-head-text{min-width:0;display:flex;flex-direction:column;gap:6px}
-.hpx-title{font-size:30px;font-weight:600;line-height:1.15;letter-spacing:-.01em;margin:0}
+.hpx-title{font-size:28px;font-weight:600;line-height:1.25;letter-spacing:-.01em;margin:0}
 .hpx-subtitle{font-size:14px;font-weight:400;color:var(--dsw-alias-label-secondary);margin:0}
 .hpx-head-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none;padding-top:2px}
 .hpx-icon-btn{width:36px;height:36px;border-radius:50%;border:0;background:transparent;color:var(--dsw-alias-label-secondary);
@@ -699,7 +706,7 @@ window.__ModuleLoader__.load({
   text-align:left;cursor:pointer}
 .hpx-menu-item:hover{background:var(--dsw-alias-bg-layer-1)}
 .hpx-seg{display:inline-flex;align-items:center;gap:4px;width:330px;max-width:100%;height:50px;padding:4px;
-  margin:0 0 4px;border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+  margin:8px 0 4px;align-self:flex-start;border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
 .hpx-seg-btn{flex:1 1 auto;height:42px;border:0;border-radius:8px;background:transparent;
   color:var(--dsw-alias-label-secondary);font:inherit;font-size:14px;font-weight:500;cursor:pointer}
 .hpx-seg-btn:hover{color:var(--dsw-alias-label-primary)}
@@ -717,10 +724,10 @@ window.__ModuleLoader__.load({
   color:var(--dsw-alias-state-warn-primary);line-height:1.4;word-break:break-word}
 .hpx-text-btn{border:0;background:transparent;color:var(--dsw-alias-brand-primary);font:inherit;font-size:13px;
   cursor:pointer;padding:0 2px;text-decoration:underline;text-underline-offset:2px}
-.hpx-section{margin-top:40px}
+.hpx-section{margin-top:36px}
 .hpx-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
   margin:0 0 8px;min-height:22px}
-.hpx-section-title{font-size:16px;font-weight:600;letter-spacing:.005em;margin:0}
+.hpx-section-title{font-size:15px;font-weight:600;letter-spacing:.005em;margin:0}
 .hpx-section-note{font-size:13px;color:var(--dsw-alias-label-secondary)}
 .hpx-rows{display:flex;flex-direction:column;gap:24px;margin-top:16px}
 .hpx-row{display:flex;align-items:center;gap:16px;width:100%;min-height:96px;padding:10px 12px;
@@ -728,19 +735,20 @@ window.__ModuleLoader__.load({
 .hpx-row:hover{background:var(--dsw-alias-bg-layer-1)}
 .hpx-row.is-flash{background:color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)}
 .hpx-tile{flex:none;width:46px;height:46px;border-radius:11px;display:flex;align-items:center;
-  justify-content:center;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary)}
+  justify-content:center;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);
+  color:var(--dsw-alias-label-secondary)}
 .hpx-row-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:4px}
 .hpx-row-title-line{display:flex;align-items:center;gap:8px;min-width:0}
-.hpx-row-title{font-size:16px;font-weight:600;line-height:1.3;color:var(--dsw-alias-label-primary);
+.hpx-row-title{font-size:15px;font-weight:600;line-height:1.3;color:var(--dsw-alias-label-primary);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.hpx-badge{flex:none;display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;
+.hpx-badge{flex:none;display:inline-flex;align-items:center;height:19px;padding:0 8px;border-radius:999px;
   border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);
   font-size:11px;letter-spacing:.02em;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}
 .hpx-badge.is-warn{color:var(--dsw-alias-state-warn-primary);
   border-color:color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, var(--dsw-alias-border-l1))}
 .hpx-badge.is-error{color:var(--dsw-alias-state-error-primary);
   border-color:color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, var(--dsw-alias-border-l1))}
-.hpx-row-desc{font-size:14px;font-weight:400;line-height:1.4;color:var(--dsw-alias-label-secondary);margin:0;
+.hpx-row-desc{font-size:13.5px;font-weight:400;line-height:1.5;color:var(--dsw-alias-label-secondary);margin:0;
   overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}
 .hpx-row-desc.is-error{color:var(--dsw-alias-state-error-primary)}
 .hpx-row-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
@@ -765,17 +773,27 @@ window.__ModuleLoader__.load({
 .hpx-cancel-btn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2)}
 .hpx-quiet{display:flex;flex-direction:column;gap:6px;padding:14px 12px;color:var(--dsw-alias-label-secondary);
   font-size:14px;line-height:1.45}
-.hpx-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:40px;font-size:11.5px;
+.hpx-details-btn{margin-top:36px;align-self:flex-start;border:0;background:transparent;
+  color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;padding:0 2px;
+  text-decoration:underline;text-underline-offset:2px}
+.hpx-details-btn:hover{color:var(--dsw-alias-label-primary)}
+.hpx-details{display:flex;flex-direction:column;gap:4px;margin-top:8px;font-size:11.5px;
   color:var(--dsw-alias-label-secondary)}
+.hpx-details-row{display:flex;align-items:center;gap:8px;min-width:0}
+.hpx-details-key{flex:none;min-width:72px}
 .hpx-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;max-width:100%}
 .hpx-page button:focus-visible,.hpx-page input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);
   outline-offset:2px}
-.hpx-panel-page{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);
+.hpx-panel-page{display:flex;flex-direction:column;height:100%;min-height:100%;background:var(--dsw-alias-bg-base);
   color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:1.45}
 .hpx-panel-page *{box-sizing:border-box}
-.hpx-panel-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
-.hpx-panel-body > .hph-root{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.hpx-panel-body{flex:1 1 auto;min-height:0;height:100%;display:flex;flex-direction:column}
+.hpx-panel-body > .hph-root{flex:1 1 auto;min-height:0;height:auto !important;display:flex;flex-direction:column}
+.hpx-panel-body .hph-route{min-height:0}
+.hpx-panel-debug{flex:none;padding:4px 10px;border-top:1px solid var(--dsw-alias-border-l1);font-size:11px;
+  color:var(--dsw-alias-label-secondary);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hpx-panel-state{margin:auto;display:flex;flex-direction:column;align-items:center;gap:9px;max-width:520px;
   padding:18px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);
   background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:12px;text-align:center}
@@ -1212,11 +1230,16 @@ window.__ModuleLoader__.load({
       useSessionBridgeRef(props)
       const [reloadToken, setReloadToken] = useState(0)
       const [state, setState] = useState({ phase: 'loading', instance: null, error: null })
+      const [panelSize, setPanelSize] = useState(null)
+      const [emptyPanel, setEmptyPanel] = useState(null)
+      const bodyRef = useRef(null)
 
+      /* Load once when the panel mounts; the cleanup disposes that instance. */
       useEffect(() => {
         let cancelled = false
         let loadedInstance = null
         setState({ phase: 'loading', instance: null, error: null })
+        setEmptyPanel(null)
         ;(async () => {
           try {
             const plugin = storeGetPlugin(pluginName)
@@ -1251,41 +1274,121 @@ window.__ModuleLoader__.load({
         }
       }, [pluginName, reloadToken, hostBridge])
 
+      /* Measure the rendered body; if the plugin produces a 0-sized page, show a
+         warning card instead of leaving a blank panel (bounds turn to 0 when the
+         height chain above the plugin cannot resolve). */
+      useEffect(() => {
+        if (state.phase !== 'ready') return undefined
+        let cancelled = false
+        let observer = null
+        const readSize = () => {
+          const node = bodyRef.current
+          if (!node) return null
+          let width = 0
+          let height = 0
+          try {
+            const rect = typeof node.getBoundingClientRect === 'function' ? node.getBoundingClientRect() : null
+            width = rect ? rect.width : 0
+            height = rect ? rect.height : 0
+          } catch (error) {
+            width = 0
+            height = 0
+          }
+          if (!width && !height) {
+            width = node.clientWidth || 0
+            height = node.clientHeight || 0
+          }
+          return { width: Math.round(width), height: Math.round(height) }
+        }
+        const update = () => {
+          if (cancelled) return
+          const size = readSize()
+          if (size) setPanelSize(size)
+        }
+        update()
+        try {
+          if (typeof ResizeObserver !== 'undefined' && bodyRef.current) {
+            observer = new ResizeObserver(update)
+            observer.observe(bodyRef.current)
+          }
+        } catch (error) {
+          observer = null
+        }
+        const timer = setTimeout(() => {
+          if (cancelled) return
+          const size = readSize()
+          if (size) setPanelSize(size)
+          if (!size || size.width < 8 || size.height < 8) {
+            setEmptyPanel(size || { width: 0, height: 0 })
+          }
+        }, 1200)
+        return () => {
+          cancelled = true
+          clearTimeout(timer)
+          if (observer) {
+            try {
+              observer.disconnect()
+            } catch (error) {
+              /* ignore */
+            }
+          }
+        }
+      }, [state.phase, reloadToken])
+
       const plugin = storeGetPlugin(pluginName)
       const label = plugin ? plugin.label : pluginName
+      const instance = state.instance
+      let routes = null
+      try {
+        routes = instance && Array.isArray(instance.routes) ? instance.routes : null
+      } catch (error) {
+        routes = null
+      }
+      const routeCount = routes ? routes.length : 0
+      const noRoutes = state.phase === 'ready' && routes !== null && routeCount === 0
 
-      let body = null
-      if (state.phase === 'ready' && state.instance) {
-        body = h(
-          'div',
-          { className: 'hpx-panel-body' },
-          h(
-            PluginErrorBoundary,
-            { key: `${pluginName}:${reloadToken}` },
-            h('div', { className: 'hph-root' }, h(state.instance.Root)),
-          ),
-        )
-      } else if (state.phase === 'error') {
-        body = h(
+      let debugEnabled = false
+      try {
+        debugEnabled = typeof window !== 'undefined' && !!window.location && String(window.location.hash || '').indexOf('hermes-debug') >= 0
+      } catch (error) {
+        debugEnabled = false
+      }
+
+      const retryButton = h(
+        'button',
+        { className: 'hpx-btn hpx-btn-tiny', type: 'button', onClick: () => setReloadToken((value) => value + 1) },
+        TEXT.tryAgain,
+      )
+
+      const errorCard = (title, detail) =>
+        h(
           'div',
           { className: 'hpx-panel-state' },
           h(
             'div',
             { className: 'hpx-error', role: 'alert' },
             h(Icon, { name: 'alert', size: 14 }),
-            h(
-              'div',
-              { className: 'hpx-error-body' },
-              h('strong', null, TEXT.panelErrorTitle),
-              h('span', null, state.error),
-            ),
+            h('div', { className: 'hpx-error-body' }, h('strong', null, title), h('span', null, detail)),
           ),
-          h(
-            'button',
-            { className: 'hpx-btn hpx-btn-tiny', onClick: () => setReloadToken((value) => value + 1) },
-            TEXT.tryAgain,
-          ),
+          retryButton,
         )
+
+      let body = null
+      if (state.phase === 'ready' && instance) {
+        if (emptyPanel) {
+          body = errorCard(TEXT.emptyPanelTitle, TEXT.emptyPanelDetail(emptyPanel.width, emptyPanel.height))
+        } else {
+          const readyContent = noRoutes
+            ? errorCard(TEXT.noRoutesTitle, TEXT.noRoutesDetail(pluginName, routeCount))
+            : h(
+                PluginErrorBoundary,
+                { key: `${pluginName}:${reloadToken}` },
+                h('div', { className: 'hph-root' }, h(instance.Root)),
+              )
+          body = h('div', { className: 'hpx-panel-body', ref: bodyRef }, readyContent)
+        }
+      } else if (state.phase === 'error') {
+        body = errorCard(TEXT.panelErrorTitle, state.error)
       } else {
         body = h(
           'div',
@@ -1295,9 +1398,20 @@ window.__ModuleLoader__.load({
         )
       }
 
-      return h('div', { className: 'hpx-panel-page' }, h(StyleTag), body)
+      const debugSize = emptyPanel || panelSize || { width: 0, height: 0 }
+      const debugStrip = debugEnabled
+        ? h(
+            'div',
+            { className: 'hpx-panel-debug' },
+            TEXT.debugStrip(pluginName, state.phase, routeCount, debugSize.width, debugSize.height),
+          )
+        : null
+
+      return h('div', { className: 'hpx-panel-page' }, h(StyleTag), body, debugStrip)
     }
 
+    /* ------------------------------------------------------------------ */
+    /* Page                                                               */
     /* ------------------------------------------------------------------ */
 
     function HermesPluginsPage(props) {
@@ -1315,6 +1429,7 @@ window.__ModuleLoader__.load({
       const [installOpen, setInstallOpen] = useState(false)
       const [installMode, setInstallMode] = useState('path')
       const [menuOpen, setMenuOpen] = useState(false)
+      const [detailsOpen, setDetailsOpen] = useState(false)
       const mountedRef = useRef(true)
       const inputRef = useRef(null)
       const menuRef = useRef(null)
@@ -1526,13 +1641,7 @@ window.__ModuleLoader__.load({
         const hue = hashHue(name)
         return h(
           'span',
-          {
-            className: 'hpx-tile',
-            style: {
-              background: `color-mix(in srgb, hsl(${hue} 62% 52%) 14%, var(--dsw-alias-bg-layer-1))`,
-              color: `hsl(${hue} 62% 52%)`,
-            },
-          },
+          { className: 'hpx-tile', style: { color: `hsl(${hue} 62% 52%)` } },
           h(Icon, { name: 'plugins', size: 22 }),
         )
       }
@@ -1717,6 +1826,7 @@ window.__ModuleLoader__.load({
                 'div',
                 { className: 'hpx-section-head' },
                 h('h2', { className: 'hpx-section-title' }, TEXT.sectionAgentOnly),
+                h('span', { className: 'hpx-section-note' }, String(agentPlugins.length)),
               ),
               h('div', { className: 'hpx-rows' }, agentPlugins.map(renderInstalledRow)),
             ),
@@ -1920,15 +2030,39 @@ window.__ModuleLoader__.load({
               ),
           sections,
           h(
-            'div',
-            { className: 'hpx-foot' },
-            list.store ? h('span', null, h('span', null, TEXT.storeLabel + ': '), h('span', { className: 'hpx-mono' }, list.store)) : null,
-            routeMode ? h('span', null, `${TEXT.modeLabel}: ${routeMode === 'primary' ? '/api/hermes-plugins' : '/hermes-plugins'}`) : null,
-            list.hermesPluginsDir
-              ? h('span', { className: 'hpx-mono', title: list.hermesPluginsDir }, list.hermesPluginsDir)
-              : null,
-            list.hermesHome ? h('span', { className: 'hpx-mono', title: list.hermesHome }, list.hermesHome) : null,
+            'button',
+            {
+              className: 'hpx-details-btn',
+              type: 'button',
+              'aria-expanded': detailsOpen,
+              onClick: () => setDetailsOpen((value) => !value),
+            },
+            TEXT.details,
           ),
+          detailsOpen
+            ? h(
+                'div',
+                { className: 'hpx-details' },
+                h(
+                  'div',
+                  { className: 'hpx-details-row' },
+                  h('span', { className: 'hpx-details-key' }, TEXT.storeLabel),
+                  h('span', { className: 'hpx-mono' }, list.store || '—'),
+                ),
+                h(
+                  'div',
+                  { className: 'hpx-details-row' },
+                  h('span', { className: 'hpx-details-key' }, TEXT.modeLabel),
+                  h('span', { className: 'hpx-mono' }, routeMode === 'fallback' ? '/hermes-plugins' : '/api/hermes-plugins'),
+                ),
+                h(
+                  'div',
+                  { className: 'hpx-details-row' },
+                  h('span', { className: 'hpx-details-key' }, TEXT.pluginsDirLabel),
+                  h('span', { className: 'hpx-mono', title: list.hermesPluginsDir || list.hermesHome || '' }, list.hermesPluginsDir || list.hermesHome || '—'),
+                ),
+              )
+            : null,
         ),
       )
     }
