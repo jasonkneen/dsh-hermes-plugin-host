@@ -1253,6 +1253,122 @@ window.__ModuleLoader__.load({
     }
 
     /* ------------------------------------------------------------------ */
+    /* Dark scene bridge                                                   */
+    /* ------------------------------------------------------------------ */
+
+    /*
+     * Hermes plugins pick their own palette with
+     * `document.documentElement.classList.contains('dark')`; the Harness never
+     * sets that class, so office-3d always draws its light scene inside a dark
+     * app. Bridge only the class the plugin sniffs, for as long as one of our
+     * panels is mounted, and never for a class the app itself set.
+     */
+    let darkSceneCount = 0
+    let darkSceneOwned = false
+
+    function parseRgbColor(value) {
+      const text = String(value == null ? '' : value)
+      const match = /rgba?\(\s*([0-9.]+)\s*[,\s]\s*([0-9.]+)\s*[,\s]\s*([0-9.]+)/i.exec(text)
+      if (!match) return null
+      const red = Number(match[1])
+      const green = Number(match[2])
+      const blue = Number(match[3])
+      if (!Number.isFinite(red) || !Number.isFinite(green) || !Number.isFinite(blue)) return null
+      return { red, green, blue }
+    }
+
+    /** Luminance probe used when no Client theme service is available. */
+    function probeDocumentDark() {
+      try {
+        if (typeof document === 'undefined' || typeof getComputedStyle !== 'function') return null
+        const targets = [document.body, document.documentElement]
+        for (const node of targets) {
+          if (!node) continue
+          const style = getComputedStyle(node)
+          const rgb = parseRgbColor(style && style.backgroundColor)
+          if (!rgb) continue
+          const luminance = (0.2126 * rgb.red + 0.7152 * rgb.green + 0.0722 * rgb.blue) / 255
+          return luminance < 0.5
+        }
+        return null
+      } catch (error) {
+        return null
+      }
+    }
+
+    /** Duck-typed theme service: `getTheme()`/`getSnapshot()` → string or `{ mode|id|theme|name }`. */
+    function themeModeFromService(themeService) {
+      try {
+        if (!themeService) return null
+        const read = (value) => {
+          if (typeof value === 'string') return value
+          if (value && typeof value === 'object') {
+            const candidate = value.mode || value.id || value.theme || value.name
+            return typeof candidate === 'string' ? candidate : null
+          }
+          return null
+        }
+        if (typeof themeService.getTheme === 'function') {
+          const value = read(themeService.getTheme())
+          if (value) return value
+        }
+        if (typeof themeService.getSnapshot === 'function') {
+          const value = read(themeService.getSnapshot())
+          if (value) return value
+        }
+      } catch (error) {
+        return null
+      }
+      return null
+    }
+
+    /** true = dark host, false = light host, null = unknown. */
+    function resolveHostDark(themeService) {
+      const mode = themeModeFromService(themeService)
+      if (mode) {
+        const lower = mode.toLowerCase()
+        if (lower.indexOf('dark') >= 0) return true
+        if (lower.indexOf('light') >= 0) return false
+      }
+      return probeDocumentDark()
+    }
+
+    /** Refcounted `dark` class for the plugin palette sniff; returns a release fn. */
+    function acquireDarkScene() {
+      try {
+        if (typeof document === 'undefined' || !document.documentElement) return () => {}
+        const root = document.documentElement
+        if (!root.classList || typeof root.classList.add !== 'function') return () => {}
+        const hadDark = typeof root.classList.contains === 'function' ? root.classList.contains('dark') : false
+        darkSceneCount += 1
+        if (!hadDark) {
+          try {
+            root.classList.add('dark')
+            darkSceneOwned = true
+          } catch (error) {
+            /* the class list is best-effort */
+          }
+        }
+        let released = false
+        return () => {
+          if (released) return
+          released = true
+          darkSceneCount = Math.max(0, darkSceneCount - 1)
+          if (darkSceneCount === 0 && darkSceneOwned) {
+            try {
+              root.classList.remove('dark')
+            } catch (error) {
+              /* ignore */
+            }
+            darkSceneOwned = false
+          }
+        }
+      } catch (error) {
+        return () => {}
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
     /* One lazy panel per installed plugin                                 */
     /* ------------------------------------------------------------------ */
 
@@ -1264,6 +1380,7 @@ window.__ModuleLoader__.load({
     function PluginPanelHost(props) {
       const pluginName = String((props && props.pluginName) || '')
       const hostBridge = props && props.hostBridge ? props.hostBridge : {}
+      const themeService = props && props.themeService ? props.themeService : null
       useSessionBridgeRef(props)
       const [reloadToken, setReloadToken] = useState(0)
       const [state, setState] = useState({ phase: 'loading', instance: null, error: null })
@@ -1310,6 +1427,48 @@ window.__ModuleLoader__.load({
           loadedInstance = null
         }
       }, [pluginName, reloadToken, hostBridge])
+
+      /* Bridge the host dark mode for the plugin's own palette sniff (see above). */
+      useEffect(() => {
+        let release = null
+        let unsubscribe = null
+        let disposed = false
+        const sync = () => {
+          try {
+            if (release) {
+              release()
+              release = null
+            }
+            if (resolveHostDark(themeService) === true) release = acquireDarkScene()
+          } catch (error) {
+            release = null
+          }
+        }
+        sync()
+        try {
+          if (themeService && typeof themeService.subscribe === 'function') {
+            unsubscribe = themeService.subscribe(() => {
+              if (!disposed) sync()
+            })
+          }
+        } catch (error) {
+          unsubscribe = null
+        }
+        return () => {
+          disposed = true
+          try {
+            if (typeof unsubscribe === 'function') unsubscribe()
+          } catch (error) {
+            /* ignore */
+          }
+          try {
+            if (release) release()
+          } catch (error) {
+            /* ignore */
+          }
+          release = null
+        }
+      }, [themeService])
 
       /* Measure the rendered body; if the plugin produces a 0-sized page, show a
          warning card instead of leaving a blank panel (bounds turn to 0 when the
@@ -2219,6 +2378,7 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         const layout = ctx.layout || (typeof ctx.get === 'function' ? ctx.get('layout') : undefined)
         const uiWorkspace = ctx.uiWorkspace || (typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined)
+        const themeService = ctx.theme || (typeof ctx.get === 'function' ? ctx.get('theme') : undefined)
         const openPanel = (panelId) => {
           try {
             if (layout && typeof layout.selectPanel === 'function') {
@@ -2256,7 +2416,9 @@ window.__ModuleLoader__.load({
             ctx.slots.register(
               { name: 'main', key: item.id },
               (slotProps) =>
-                guarded(h(PluginPanelHost, Object.assign({}, slotProps, { pluginName: item.name, hostBridge }))),
+                guarded(
+                  h(PluginPanelHost, Object.assign({}, slotProps, { pluginName: item.name, hostBridge, themeService })),
+                ),
             )
           const management = ctx.slots.register(
             { name: 'main', key: PANEL_ID },
