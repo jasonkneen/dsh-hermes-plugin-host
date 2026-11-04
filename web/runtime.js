@@ -533,6 +533,27 @@ const SDK_REGISTRY = '__dshHermesSdkRegistry'
 const TOAST_TTL_MS = 6000
 const MAX_TOASTS = 6
 
+/**
+ * Merge a caller-provided `api.host` over the runtime's own host surface.
+ *
+ * The runtime implements `navigate`, `notify` and `notifyError` itself (they
+ * drive the in-page route and the toast stack). A plugin's `host.newChat`,
+ * `host.openSession` and `host.request` have no in-page equivalent — they are
+ * real Harness navigation — so the Client injects those and wins for any member
+ * it supplies, while everything else keeps the runtime's implementation.
+ *
+ * `controller.host` is rebuilt per instance, so this copies the function
+ * references rather than mutating it.
+ */
+function mergeHost(base, injected) {
+  if (!injected || typeof injected !== 'object') return base
+  const merged = Object.assign({}, base)
+  for (const key of Object.keys(injected)) {
+    if (typeof injected[key] === 'function') merged[key] = injected[key]
+  }
+  return merged
+}
+
 export function createHermesRuntime(options) {
   const opts = options || {}
   const React = opts.React
@@ -1225,7 +1246,7 @@ export function createHermesRuntime(options) {
         api: {
           rest: (pluginName, path, init) => restRequest(pluginName || name, path, init),
           storage: (pluginName) => storageFor(pluginName || name),
-          host: controller.host,
+          host: mergeHost(controller.host, injectedApi.host),
         },
       })
     } catch (err) {

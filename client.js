@@ -73,13 +73,14 @@ window.__ModuleLoader__.load({
       backendUnreachable: 'The plugin backend is unreachable.',
       backendFailed: (status) => `Backend request failed (HTTP ${status})`,
       backendNotMounted: (status) => `The plugin backend route is not mounted (HTTP ${status}).`,
+      hostUnknownSession: 'That session is no longer available in DeepSeek Harness.',
+      hostUnknownRequest: (method) => `'${method}' is not available in DeepSeek Harness.`,
       badges: {
         desktop: 'desktop',
         backend: 'backend',
         tools: (names) => `tools: ${names.join(', ')}`,
         broken: 'manifest',
         hermesHome: 'hermes home',
-        warning: 'warning',
         agentOnly: 'agent-only',
       },
       listFailed: 'Could not load the plugin list.',
@@ -407,6 +408,90 @@ window.__ModuleLoader__.load({
       }
       if (lastError && lastError.message) throw lastError
       throw new Error(TEXT.backendUnreachable)
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Session snapshot bridge (slot standardProps -> host bridge)          */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Latest `useSessions` snapshot from the `main` slot's standard props.
+     * The page keeps its own `useRef` and registers it here once mounted; the
+     * host bridge (created in `apply`) reads it synchronously when a Run starts.
+     */
+    let sessionSnapshotRef = null
+
+    function sessionStamp(value) {
+      const stamp =
+        value.updatedAt !== undefined
+          ? value.updatedAt
+          : value.time !== undefined
+            ? value.time
+            : value.createdAt !== undefined
+              ? value.createdAt
+              : value.updated_at !== undefined
+                ? value.updated_at
+                : value.updatedAtMs !== undefined
+                  ? value.updatedAtMs
+                  : 0
+      if (typeof stamp === 'string') return Date.parse(stamp) || 0
+      const numeric = Number(stamp)
+      return Number.isFinite(numeric) ? numeric : 0
+    }
+
+    /**
+     * Tolerate every plausible `useSessions` snapshot shape:
+     *   - `{ ids: string[], byId: Record<id, summary> }`
+     *   - `{ sessions: [...] }`
+     *   - a plain array of summaries
+     * Each entry becomes `{ id, title, updatedAt }`.
+     */
+    function normalizeSessionSnapshot(snapshot) {
+      const entries = []
+      const push = (value, fallbackId) => {
+        if (value == null) return
+        if (typeof value === 'string') {
+          entries.push({ id: value, title: '', updatedAt: 0 })
+          return
+        }
+        if (typeof value !== 'object') return
+        const rawId = value.sessionId || value.id || value.session_id || fallbackId
+        if (!rawId) return
+        entries.push({
+          id: String(rawId),
+          title:
+            typeof value.title === 'string' ? value.title : typeof value.name === 'string' ? value.name : '',
+          updatedAt: sessionStamp(value),
+        })
+      }
+
+      if (Array.isArray(snapshot)) {
+        for (const item of snapshot) push(item)
+        return entries
+      }
+      if (!snapshot || typeof snapshot !== 'object') return entries
+      if (Array.isArray(snapshot.sessions)) {
+        for (const item of snapshot.sessions) push(item)
+        return entries
+      }
+      if (snapshot.byId && typeof snapshot.byId === 'object') {
+        const ids = Array.isArray(snapshot.ids) ? snapshot.ids : Object.keys(snapshot.byId)
+        for (const id of ids) push(snapshot.byId[id], id)
+        return entries
+      }
+      if (Array.isArray(snapshot.ids)) {
+        for (const id of snapshot.ids) push(id)
+        return entries
+      }
+      return entries
+    }
+
+    function readSessionEntries() {
+      try {
+        return normalizeSessionSnapshot(sessionSnapshotRef && sessionSnapshotRef.current)
+      } catch (error) {
+        return []
+      }
     }
 
     /* ------------------------------------------------------------------ */
@@ -769,7 +854,21 @@ window.__ModuleLoader__.load({
     /* Page                                                               */
     /* ------------------------------------------------------------------ */
 
-    function HermesPluginsPage() {
+    function HermesPluginsPage(props) {
+      const hostBridge = props && props.hostBridge ? props.hostBridge : null
+
+      /* `useSessions` is one of the `main` slot's standard props. It is called
+         once, unconditionally, at the top of the component; its latest value is
+         kept in a ref so the host bridge can read it synchronously. */
+      const sessionsRef = useRef(null)
+      let sessionSnapshot = null
+      try {
+        sessionSnapshot = props && typeof props.useSessions === 'function' ? props.useSessions() : null
+      } catch (error) {
+        sessionSnapshot = null
+      }
+      sessionsRef.current = sessionSnapshot
+
       const [list, setList] = useState({
         status: 'loading',
         plugins: [],
@@ -844,6 +943,14 @@ window.__ModuleLoader__.load({
         }
       }, [loadList])
 
+      /* Publish the session ref for `apply`'s host bridge. */
+      useEffect(() => {
+        sessionSnapshotRef = sessionsRef
+        return () => {
+          if (sessionSnapshotRef === sessionsRef) sessionSnapshotRef = null
+        }
+      }, [])
+
       /* Flash the freshly installed row, then stop. */
       useEffect(() => {
         if (!flash) return undefined
@@ -892,7 +999,7 @@ window.__ModuleLoader__.load({
             const runtime = modules.createHermesRuntime({
               React,
               createSdk: modules.createSdk,
-              api: { rest },
+              api: { rest, host: hostBridge || {} },
               apiBase,
             })
             if (!runtime || typeof runtime.load !== 'function') {
@@ -915,7 +1022,7 @@ window.__ModuleLoader__.load({
             if (mountedRef.current) clearBusy(setBusy, plugin.name)
           }
         },
-        [applyRunning],
+        [applyRunning, hostBridge],
       )
 
       const submitInstall = useCallback(
@@ -1358,9 +1465,10 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------------ */
 
     return {
-      inject: ['slots', 'layout'],
+      inject: ['slots', 'layout', 'uiWorkspace'],
       apply(ctx) {
         const layout = ctx.layout || (typeof ctx.get === 'function' ? ctx.get('layout') : undefined)
+        const uiWorkspace = ctx.uiWorkspace || (typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined)
         const openPage = () => {
           try {
             if (layout && typeof layout.selectPanel === 'function') {
@@ -1377,8 +1485,56 @@ window.__ModuleLoader__.load({
           }
         }
 
-        /* The page itself: `main` is keyed by the sidebar entry id. */
-        ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID }, HermesPluginsPage))
+        /* `api.host` is merged over the runtime's built-in host member by member.
+           Members we can really serve are supplied; anything omitted (for example
+           when `uiWorkspace` is absent in this profile) keeps the runtime's own
+           fallback, which warns once as a toast. */
+        const hostBridge = {}
+        if (uiWorkspace && typeof uiWorkspace.startSession === 'function') {
+          hostBridge.newChat = () => {
+            uiWorkspace.startSession()
+            return Promise.resolve()
+          }
+        }
+        if (uiWorkspace && typeof uiWorkspace.openSession === 'function') {
+          // `async` on purpose: a failure must be a REJECTION, not a synchronous
+          // throw. Plugins guard this call as `Promise.resolve(host.openSession(x))
+          // .catch(...)` — a sync throw skips that catch entirely and escapes
+          // uncaught instead of surfacing as an error toast.
+          hostBridge.openSession = async (sessionId) => {
+            const target = String(sessionId == null ? '' : sessionId)
+            const known = readSessionEntries().some((entry) => entry.id === target)
+            if (!known) throw new Error(TEXT.hostUnknownSession)
+            uiWorkspace.openSession(sessionId)
+          }
+        }
+        // `async` for the same reason: callers await this inside a try/catch.
+        hostBridge.request = async (method, params) => {
+          if (method === 'session.list') {
+            const entries = readSessionEntries().slice().sort((a, b) => b.updatedAt - a.updatedAt)
+            const requested = params && params.limit
+            const limit = Number.isFinite(Number(requested)) && Number(requested) > 0 ? Math.floor(Number(requested)) : 0
+            const chosen = limit ? entries.slice(0, limit) : entries
+            return {
+              sessions: chosen.map((entry) => ({
+                session_id: entry.id,
+                id: entry.id,
+                title: entry.title,
+                updated_at: entry.updatedAt,
+              })),
+            }
+          }
+          throw new Error(TEXT.hostUnknownRequest(method))
+        }
+
+        /* The page itself: `main` is keyed by the sidebar entry id. The host
+           bridge is passed as an extra prop because it is built here in apply. */
+        ctx.slots.inject('main', () =>
+          ctx.slots.register(
+            { name: 'main', key: PANEL_ID },
+            (slotProps) => h(HermesPluginsPage, Object.assign({}, slotProps, { hostBridge })),
+          ),
+        )
 
         /* Sidebar entry; the shell selects `main` with this id when clicked. */
         ctx.slots.inject('sidebar.panellist', () =>
