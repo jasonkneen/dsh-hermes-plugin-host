@@ -22,6 +22,7 @@
  */
 
 import { createBackendManager } from './lib/backend.js'
+import { createDshAdapter } from './lib/datasource.js'
 import { resolveStoreDir } from './lib/registry.js'
 import { createOperations, registerFallbackRoute, registerFetchRoutes } from './lib/routes.js'
 import { createToolDefinitions, registerTools } from './lib/tools.js'
@@ -118,10 +119,16 @@ export function apply(ctx, config) {
   // The sidecar processes outlive individual requests: kill them on unload.
   ctx.effect(() => () => backend.dispose(), 'hermes-plugin-host: stop backend sidecars on unload')
 
+  // The data-source adapter answers `GET /state` from Harness state when a
+  // plugin's source is `dsh`. Services are resolved through `ctx.get` on every
+  // call, so a service that appears after activation is picked up without a
+  // reload, and an absent one degrades to a 503 instead of breaking activation.
+  const adapter = createDshAdapter({ getService: (serviceName) => ctx.get(serviceName), log })
+
   // Version is read asynchronously so activation stays synchronous; `health`
   // reports the package version once it lands.
   const versionState = { value: FALLBACK_VERSION }
-  const ops = createOperations({ store, backend, log, version: () => versionState.value, startedAt })
+  const ops = createOperations({ store, backend, adapter, log, version: () => versionState.value, startedAt })
   void readPackageVersion().then((version) => {
     versionState.value = version || FALLBACK_VERSION
   })
@@ -143,6 +150,7 @@ export function apply(ctx, config) {
               '## Hermes Plugins',
               'This Harness can install and run Hermes Desktop plugins (the hermes-desktop-plugin-* family); `hermes_plugin_list` shows what is installed, `hermes_plugin_install` adds one from a local directory or git URL, and `hermes_plugin_remove` deletes one.',
               'An installed plugin has a browser UI half the user opens from the Hermes Plugins page, and some also have a Python backend half whose live data you can read with `hermes_plugin_backend` (for office-3d, GET /state returns each profile\'s online/busy state, sessions, tokens and cost) — the first call starts that backend and may take a few seconds.',
+              'A plugin can show either Hermes Desktop profiles (its own Python backend) or this Harness\'s own workspaces and live agents: `hermes_plugin_data_source` reads or switches that per-plugin source, and `hermes_plugin_backend` accepts a one-call `source` override so you can compare both views.',
               'Prefer these tools over guessing at plugin state, and report the real numbers the backend returns.',
             ].join(' '),
           }),

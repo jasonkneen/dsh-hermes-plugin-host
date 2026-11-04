@@ -102,6 +102,11 @@ window.__ModuleLoader__.load({
       crashHint: 'Its render threw. Use Try again to restart the panel — the rest of the app stays usable.',
       panelMissing: 'This plugin is no longer installed.',
       details: 'Details',
+      dataSourceLabel: 'Data',
+      dataSourceHermes: 'Hermes',
+      dataSourceHarness: 'Harness',
+      dataSourceHint: 'Showing DeepSeek Harness workspaces and agents instead of Hermes profiles.',
+      dataSourceFailed: 'Could not switch the data source.',
       pluginsDirLabel: 'Plugins dir',
       emptyPanelTitle: 'This plugin rendered an empty page',
       emptyPanelDetail: (width, height) => `Panel measured ${width}×${height}.`,
@@ -754,6 +759,18 @@ window.__ModuleLoader__.load({
 .hpx-row-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
   color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0}
 .hpx-row-tail{flex:none;display:flex;align-items:center;gap:6px}
+.hpx-source{display:inline-flex;align-items:center;gap:5px;flex:none;height:32px}
+.hpx-source-label{font-size:11.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.hpx-source-track{display:inline-flex;align-items:center;gap:2px;height:28px;padding:2px;border-radius:8px;
+  background:var(--dsw-alias-bg-layer-1)}
+.hpx-source-btn{height:24px;padding:0 8px;border:0;border-radius:6px;background:transparent;
+  color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;font-weight:500;line-height:1;
+  cursor:pointer;white-space:nowrap}
+.hpx-source-btn:hover{color:var(--dsw-alias-label-primary)}
+.hpx-source-btn.is-on{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}
+.hpx-source-btn[disabled]{opacity:.55;cursor:default}
+.hpx-source-hint{font-size:11.5px;line-height:1.4;color:var(--dsw-alias-label-secondary);margin:0}
+.hpx-source-error{font-size:12px;line-height:1.4;color:var(--dsw-alias-state-error-primary);margin:0}
 .hpx-open-btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);
   background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;font-weight:500;
   cursor:pointer;white-space:nowrap}
@@ -890,6 +907,7 @@ window.__ModuleLoader__.load({
         backendApi: typeof raw.backendApi === 'string' ? raw.backendApi : '',
         installedAt: Number.isFinite(raw.installedAt) ? raw.installedAt : 0,
         source: typeof raw.source === 'string' ? raw.source : '',
+        dataSource: raw.dataSource === 'dsh' ? 'dsh' : 'hermes',
         warnings: Array.isArray(raw.warnings) ? raw.warnings.filter((entry) => typeof entry === 'string') : [],
         error: typeof raw.error === 'string' && raw.error ? raw.error : null,
       }
@@ -1431,6 +1449,9 @@ window.__ModuleLoader__.load({
       const [installMode, setInstallMode] = useState('path')
       const [menuOpen, setMenuOpen] = useState(false)
       const [detailsOpen, setDetailsOpen] = useState(false)
+      const [sourceOverrides, setSourceOverrides] = useState({})
+      const [sourceBusy, setSourceBusy] = useState({})
+      const [sourceErrors, setSourceErrors] = useState({})
       const mountedRef = useRef(true)
       const inputRef = useRef(null)
       const menuRef = useRef(null)
@@ -1626,6 +1647,70 @@ window.__ModuleLoader__.load({
         [openPanel],
       )
 
+      const chooseDataSource = useCallback(
+        async (plugin, source) => {
+          const name = plugin.name
+          const previous = sourceOverrides[name] || (plugin.dataSource === 'dsh' ? 'dsh' : 'hermes')
+          if (source === previous) return
+          setSourceErrors((previousErrors) => {
+            const next = Object.assign({}, previousErrors)
+            delete next[name]
+            return next
+          })
+          // Optimistic highlight; reverted below when the Host refuses the switch.
+          setSourceOverrides((previousOverrides) => Object.assign({}, previousOverrides, { [name]: source }))
+          setSourceBusy((previousBusy) => Object.assign({}, previousBusy, { [name]: true }))
+          try {
+            const payload = await fetchJson('data-source', {
+              method: 'POST',
+              body: { name, source },
+              timeoutMs: 30000,
+            })
+            if (!mountedRef.current) return
+            if (!payload.ok) {
+              setSourceOverrides((previousOverrides) => {
+                const next = Object.assign({}, previousOverrides)
+                delete next[name]
+                return next
+              })
+              setSourceErrors((previousErrors) =>
+                Object.assign({}, previousErrors, { [name]: payload.error || TEXT.dataSourceFailed }),
+              )
+              return
+            }
+            await store.refresh()
+            if (!mountedRef.current) return
+            const fresh = store.getSnapshot().plugins.find((entry) => entry.name === name)
+            if (fresh && fresh.dataSource === source) {
+              setSourceOverrides((previousOverrides) => {
+                const next = Object.assign({}, previousOverrides)
+                delete next[name]
+                return next
+              })
+            }
+          } catch (error) {
+            if (!mountedRef.current) return
+            setSourceOverrides((previousOverrides) => {
+              const next = Object.assign({}, previousOverrides)
+              delete next[name]
+              return next
+            })
+            setSourceErrors((previousErrors) =>
+              Object.assign({}, previousErrors, { [name]: String((error && error.message) || error) }),
+            )
+          } finally {
+            if (mountedRef.current) {
+              setSourceBusy((previousBusy) => {
+                const next = Object.assign({}, previousBusy)
+                delete next[name]
+                return next
+              })
+            }
+          }
+        },
+        [store, sourceOverrides],
+      )
+
       const openInstallForm = useCallback((mode) => {
         setInstallMode(mode)
         setInstallOpen(true)
@@ -1676,9 +1761,47 @@ window.__ModuleLoader__.load({
       const renderInstalledRow = (plugin) => {
         const rowBusy = busy[plugin.name] || null
         const confirm = confirmRemove === plugin.name
+        const override = sourceOverrides[plugin.name]
+        const selectedSource = override || (plugin.dataSource === 'dsh' ? 'dsh' : 'hermes')
+        const sourceBusyFlag = !!sourceBusy[plugin.name]
+        const sourceError = sourceErrors[plugin.name] || null
+        const sourceControl = plugin.hasDesktop
+          ? h(
+              'div',
+              { className: 'hpx-source' },
+              h('span', { className: 'hpx-source-label' }, TEXT.dataSourceLabel),
+              h(
+                'div',
+                { className: 'hpx-source-track', role: 'group', 'aria-label': TEXT.dataSourceLabel },
+                h(
+                  'button',
+                  {
+                    className: selectedSource === 'hermes' ? 'hpx-source-btn is-on' : 'hpx-source-btn',
+                    type: 'button',
+                    'aria-pressed': selectedSource === 'hermes',
+                    disabled: sourceBusyFlag,
+                    onClick: () => chooseDataSource(plugin, 'hermes'),
+                  },
+                  TEXT.dataSourceHermes,
+                ),
+                h(
+                  'button',
+                  {
+                    className: selectedSource === 'dsh' ? 'hpx-source-btn is-on' : 'hpx-source-btn',
+                    type: 'button',
+                    'aria-pressed': selectedSource === 'dsh',
+                    disabled: sourceBusyFlag,
+                    onClick: () => chooseDataSource(plugin, 'dsh'),
+                  },
+                  TEXT.dataSourceHarness,
+                ),
+              ),
+            )
+          : null
         const tail = h(
           'div',
           { className: 'hpx-row-tail' },
+          sourceControl,
           plugin.hasDesktop
             ? h(
                 'button',
@@ -1746,6 +1869,8 @@ window.__ModuleLoader__.load({
             plugin.error
               ? h('p', { className: 'hpx-row-desc is-error' }, plugin.error)
               : h('p', { className: 'hpx-row-desc' }, plugin.description || TEXT.noDescription),
+            sourceError ? h('p', { className: 'hpx-source-error', role: 'alert' }, sourceError) : null,
+            selectedSource === 'dsh' ? h('p', { className: 'hpx-source-hint' }, TEXT.dataSourceHint) : null,
           ),
           tail,
         )
