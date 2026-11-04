@@ -191,7 +191,39 @@ def _unix_socket_supported(directory: str) -> bool:
             pass
 
 
-def _watch_parent_pipe() -> None:
+def _cleanup(uds, temp_dir) -> None:
+    """Remove the socket and our private temp directory.
+
+    Called from the normal exit path (``main``'s ``finally``) and from the
+    parent-death watchdog, which leaves via ``os._exit`` and therefore skips
+    ``finally`` blocks. Both paths must run this, or a killed Host leaves an
+    empty ``hph-sidecar-*`` directory and a stale socket in the system temp dir.
+    """
+    if temp_dir:
+        try:
+            import shutil
+
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+    if not uds:
+        return
+    try:
+        os.unlink(uds)
+    except Exception:
+        pass
+    # The Host normally owns and removes our socket's directory. When the Host
+    # was killed instead, nobody is left to run that cleanup, so drop the empty
+    # directory ourselves; `rmdir` refuses anything non-empty or not ours.
+    try:
+        parent = os.path.dirname(os.path.abspath(uds))
+        if os.path.basename(parent).startswith("hph-sidecar-"):
+            os.rmdir(parent)
+    except Exception:
+        pass
+
+
+def _watch_parent_pipe(uds=None, temp_dir=None) -> None:
     """Exit when the Host that spawned us goes away.
 
     The Host keeps our stdin open for exactly as long as it lives. When it dies
@@ -210,6 +242,10 @@ def _watch_parent_pipe() -> None:
             pass
         _log("host closed the parent pipe; exiting")
         try:
+            _cleanup(uds, temp_dir)
+        except Exception:
+            pass
+        try:
             sys.stderr.flush()
         except Exception:
             pass
@@ -218,9 +254,13 @@ def _watch_parent_pipe() -> None:
     try:
         import stat as stat_module
 
-        if not stat_module.S_ISFIFO(os.fstat(0).st_mode):
-            # A terminal or /dev/null: nobody is holding a pipe, so there is no
-            # parent to watch (manual debugging, systemd, a test harness).
+        mode = os.fstat(0).st_mode
+        # Only arm when stdin is a real parent-held channel. Node's
+        # `child_process` pipes are socketpairs (S_ISSOCK) on macOS, so S_ISFIFO
+        # alone would silently disable this protection where it matters most;
+        # a terminal, /dev/null or a redirected regular file means nobody is
+        # watching for our parent, and reading could steal the user's input.
+        if not (stat_module.S_ISSOCK(mode) or stat_module.S_ISFIFO(mode)):
             return
     except Exception:
         return
@@ -346,7 +386,7 @@ def main(argv=None) -> int:
     if not uds:
         port = _pick_loopback_port()
 
-    _watch_parent_pipe()
+    _watch_parent_pipe(uds, temp_dir)
     try:
         _install_exit_sentinel()
         asyncio.run(_serve(app, uds=uds, host=None if uds else "127.0.0.1", port=port))
@@ -362,18 +402,7 @@ def main(argv=None) -> int:
         _log(traceback.format_exc())
         return 5
     finally:
-        if temp_dir:
-            try:
-                import shutil
-
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
-        if uds:
-            try:
-                os.unlink(uds)
-            except Exception:
-                pass
+        _cleanup(uds, temp_dir)
 
 
 if __name__ == "__main__":
