@@ -1,19 +1,23 @@
 /**
  * Browser half of the Hermes Plugin Host bundle.
  *
- * Two contributions, both over the same set of Host routes:
- *  - `main` (key `hermes-plugins`): the Hermes Plugins management page — the list
- *    of installed hermes plugin directories, an install field (absolute path or
- *    git/https URL), per-plugin Run/Stop/Reload/Uninstall controls, and the
- *    running plugin's own desktop half rendered full-width below.
- *  - `sidebar.panellist` (id `hermes-plugins`): the sidebar entry that opens it.
+ * The management surface is one panel; every installed plugin then gets its own
+ * first-class Harness panel, exactly like the built-in Plugins page:
+ *  - `main` (key `hermes-plugins`) + `sidebar.panellist` (id `hermes-plugins`,
+ *    order 30): the Hermes Plugins browse/install/uninstall page. Its per-plugin
+ *    action is Open, which selects that plugin's own panel.
+ *  - For every installed plugin with `hasDesktop`, one `main` panel and one
+ *    `sidebar.panellist` entry with id/key `hermes:<name>` (orders 40, 41, ...),
+ *    labelled with the plugin's label (e.g. "Office 3D"). A pane is only
+ *    registered while the plugin is installed; uninstalling disposes it.
  *
- * Running a plugin is the interesting part: `web/runtime.js` and `web/sdk.js`
- * are plain ESM fetched from the Host as text, imported through blob URLs, and
- * handed to `createHermesRuntime({ React, createSdk, api })`; the page's `api.rest`
- * owns the two-carrier backend transport (see `rest()` below). The Root is a
- * normal React component, so it renders inside this page with the Harness theme
- * (no iframe). Every instance is disposed on switch, Stop, Reload and unmount.
+ * A plugin panel lazily mounts its desktop half: `web/runtime.js` and `web/sdk.js`
+ * are plain ESM fetched from the Host as text (cached once per app), imported
+ * through blob URLs, and handed to `createHermesRuntime({ React, createSdk, api })`;
+ * the page's `api.rest` owns the two-carrier backend transport (see `rest()`),
+ * `api.host` owns real Harness navigation (see `makeHostBridge()`). The Root is a
+ * normal React component, so it renders inside the panel with the Harness theme
+ * (no iframe). Each panel owns one instance and disposes it on unmount/reload.
  *
  * Transport: the Host registers the authenticated `/api/hermes-plugins/*` route
  * first and a same-origin `/hermes-plugins/*` fallback second; this client tries
@@ -35,7 +39,7 @@ window.__ModuleLoader__.load({
 
     const PANEL_ID = 'hermes-plugins'
     const ENTRY_ID = 'hermes-plugins'
-    const LIST_POLL_MS = 12000
+    const LIST_POLL_MS = 15000
 
     const TEXT = {
       title: 'Hermes Plugins',
@@ -46,10 +50,6 @@ window.__ModuleLoader__.load({
       install: 'Install',
       installing: 'Installing…',
       installHint: 'Paste a local plugin directory or a git/https URL. The directory needs plugin.yaml or desktop/plugin.js.',
-      run: 'Run',
-      starting: 'Starting…',
-      stop: 'Stop',
-      reload: 'Reload',
       uninstall: 'Uninstall',
       removeBusy: 'Removing…',
       confirmRemove: 'Confirm remove',
@@ -58,10 +58,6 @@ window.__ModuleLoader__.load({
       empty: 'No hermes plugins installed yet. Paste a plugin path or git URL above and press Install.',
       noDescription: 'No description in plugin.yaml.',
       noDesktop: 'This plugin has no desktop half, so it cannot be run here.',
-      runningTitle: (label) => `Running ${label}`,
-      runHint: 'Nothing is running. Pick a plugin above and press Run.',
-      runLoading: 'Starting the plugin…',
-      runFrameLabel: 'Plugin UI',
       crash: 'The plugin UI crashed',
       crashHint: 'Its render threw. Reload or stop the plugin — the page stays usable.',
       storeLabel: 'Store',
@@ -75,6 +71,10 @@ window.__ModuleLoader__.load({
       backendNotMounted: (status) => `The plugin backend route is not mounted (HTTP ${status}).`,
       hostUnknownSession: 'That session is no longer available in DeepSeek Harness.',
       hostUnknownRequest: (method) => `'${method}' is not available in DeepSeek Harness.`,
+      open: 'Open',
+      panelLoading: (label) => `Loading ${label}…`,
+      panelErrorTitle: 'This plugin panel could not start',
+      panelMissing: 'This plugin is no longer installed.',
       badges: {
         desktop: 'desktop',
         backend: 'backend',
@@ -85,6 +85,7 @@ window.__ModuleLoader__.load({
       },
       listFailed: 'Could not load the plugin list.',
       retry: 'Retry',
+      tryAgain: 'Try again',
       dismiss: 'Dismiss',
       installFailed: 'Install failed.',
       removeFailed: 'Uninstall failed.',
@@ -105,20 +106,16 @@ window.__ModuleLoader__.load({
         noRuntimeExport: 'The Hermes runtime module has no createHermesRuntime export.',
         noSdkExport: 'The Hermes SDK shim has no createSdk export.',
         noLoadMethod: 'The Hermes runtime has no load() method.',
-        noRoot: 'The plugin registered no Root component.',
         sourceRead: 'Could not read the plugin source.',
         sourceMissing: 'The plugin has no desktop/plugin.js source to run.',
       },
       titles: {
         desktopBadge: 'Has desktop/plugin.js',
         backendBadge: 'Has a Python backend half',
-        stop: 'Stop this plugin and dispose its runtime',
-        run: 'Load desktop/plugin.js and render its UI below',
-        reload: 'Reload the plugin source and runtime',
-        reloadDisabled: 'Run the plugin first',
         remove: 'Remove this plugin from the store',
         confirmRemove: 'Press again to remove this plugin from the store',
         availableInstall: (name) => `Install ${name} from ~/.hermes/plugins`,
+        open: 'Open this plugin panel in the sidebar',
         noDir: 'No directory reported',
         agentOnly: 'Agent-only plugin: it has no desktop or backend half to install or run here.',
       },
@@ -540,11 +537,13 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Fetch runtime + sdk + sdk.css and turn them into live module functions.
-     * Refetched on every run so editing `web/*.js` and pressing Reload picks up
-     * the change without restarting the Harness.
+     * Fetch runtime + sdk + sdk.css once per app and memoise the module pair.
+     * Every plugin panel shares it; a failure clears the cache so a panel's
+     * retry button can try again.
      */
-    async function loadRuntimeModules() {
+    let runtimeModulesPromise = null
+
+    async function loadRuntimeModulesUncached() {
       const [runtimeText, sdkText, css] = await Promise.all([
         fetchText('module', 'name=runtime', 30000),
         fetchText('module', 'name=sdk', 30000),
@@ -553,6 +552,7 @@ window.__ModuleLoader__.load({
       if (!runtimeText.ok) throw new Error(TEXT.errors.runtimeLoad(runtimeText.error))
       if (!sdkText.ok) throw new Error(TEXT.errors.sdkLoad(sdkText.error))
       if (!css.ok) throw new Error(TEXT.errors.cssLoad(css.error))
+      // One sdk stylesheet for the whole app, no matter how many panels mount.
       installSdkStyle(css.text)
       // runtime.js builds its React blob from this global (CONTRACT.md section D).
       window.__dshHermesReact = React
@@ -569,6 +569,16 @@ window.__ModuleLoader__.load({
       return { createHermesRuntime: runtimeModule.createHermesRuntime, createSdk: sdkModule.createSdk }
     }
 
+    function loadRuntimeModules() {
+      if (!runtimeModulesPromise) {
+        runtimeModulesPromise = loadRuntimeModulesUncached().catch((error) => {
+          runtimeModulesPromise = null
+          throw error
+        })
+      }
+      return runtimeModulesPromise
+    }
+
     async function loadPluginSource(name) {
       const payload = await fetchJson('source', { query: `name=${encodeURIComponent(name)}` })
       if (!payload.ok) throw new Error(payload.error || TEXT.errors.sourceRead)
@@ -577,9 +587,6 @@ window.__ModuleLoader__.load({
       }
       return payload.source
     }
-
-    /** The instance currently mounted (or loading) on the page. */
-    let activeInstance = null
 
     function disposeInstance(instance) {
       if (!instance) return
@@ -611,6 +618,11 @@ window.__ModuleLoader__.load({
         h('path', { key: 'c', d: 'M6.6 7l.8 11.2A1.6 1.6 0 0 0 9 19.8h6a1.6 1.6 0 0 0 1.6-1.6L17.4 7' }),
       ],
       plus: [h('path', { key: 'a', d: 'M12 5v14M5 12h14' })],
+      open: [
+        h('path', { key: 'a', d: 'M13.5 4.5h6v6' }),
+        h('path', { key: 'b', d: 'M19.5 4.5L11.5 12.5' }),
+        h('path', { key: 'c', d: 'M19 14.2v3.6a1.2 1.2 0 0 1-1.2 1.2H5.7a1.2 1.2 0 0 1-1.2-1.2V5.7a1.2 1.2 0 0 1 1.2-1.2h3.6' }),
+      ],
       alert: [
         h('path', { key: 'a', d: 'M12 4.5l8.2 14.2a1.2 1.2 0 0 1-1 1.8H4.8a1.2 1.2 0 0 1-1-1.8z' }),
         h('path', { key: 'b', d: 'M12 9.6v4.2M12 17.2v.2' }),
@@ -716,6 +728,18 @@ window.__ModuleLoader__.load({
 .hpx-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10.5px;color:var(--dsw-alias-label-secondary);padding-top:2px}
 .hpx-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 @media (prefers-reduced-motion:reduce){.hpx-btn{transition:none}}
+.hpx-panel-page{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base);
+  color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:1.45}
+.hpx-panel-page *{box-sizing:border-box}
+.hpx-panel-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.hpx-panel-body > .hph-root{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.hpx-panel-state{margin:auto;display:flex;flex-direction:column;align-items:center;gap:9px;max-width:520px;
+  padding:18px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);
+  background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:12px;text-align:center}
+.hpx-panel-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--dsw-alias-border-l2);
+  border-top-color:var(--dsw-alias-brand-primary);animation:hpx-spin .8s linear infinite}
+@keyframes hpx-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.hpx-panel-spinner{animation:none}}
 `
 
     function StyleTag() {
@@ -837,7 +861,7 @@ window.__ModuleLoader__.load({
     }
 
     /* ------------------------------------------------------------------ */
-    /* Sidebar icon                                                       */
+    /* Sidebar icons                                                      */
     /* ------------------------------------------------------------------ */
 
     function PanelIcon(props) {
@@ -850,27 +874,38 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Page                                                               */
-    /* ------------------------------------------------------------------ */
-
-    function HermesPluginsPage(props) {
-      const hostBridge = props && props.hostBridge ? props.hostBridge : null
-
-      /* `useSessions` is one of the `main` slot's standard props. It is called
-         once, unconditionally, at the top of the component; its latest value is
-         kept in a ref so the host bridge can read it synchronously. */
-      const sessionsRef = useRef(null)
-      let sessionSnapshot = null
-      try {
-        sessionSnapshot = props && typeof props.useSessions === 'function' ? props.useSessions() : null
-      } catch (error) {
-        sessionSnapshot = null
+    /** Stable hue per plugin name so several panels read apart in the sidebar. */
+    function hashHue(name) {
+      const text = String(name == null ? '' : name)
+      let hash = 0
+      for (let index = 0; index < text.length; index += 1) {
+        hash = (hash * 31 + text.charCodeAt(index)) >>> 0
       }
-      sessionsRef.current = sessionSnapshot
+      return hash % 360
+    }
 
-      const [list, setList] = useState({
-        status: 'loading',
+    function PluginIcon(props) {
+      const size = props && typeof props.size === 'number' ? props.size : 18
+      const name = String((props && props.name) || '')
+      const onOpen = props && typeof props.open === 'function' ? props.open : undefined
+      return h(
+        'span',
+        {
+          className: 'hpx-panel-icon',
+          onClick: onOpen,
+          style: { display: 'flex', color: `hsl(${hashHue(name)} 62% 52%)` },
+        },
+        h(Icon, { name: 'plugins', size, strokeWidth: props && props.active ? 1.9 : 1.6 }),
+      )
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Installed-plugin store (single source of truth)                     */
+    /* ------------------------------------------------------------------ */
+
+    function emptyListSnapshot() {
+      return {
+        status: 'idle',
         plugins: [],
         available: [],
         store: null,
@@ -878,78 +913,395 @@ window.__ModuleLoader__.load({
         hermesPluginsDir: null,
         webAssets: true,
         error: null,
-      })
+      }
+    }
+
+    /**
+     * Tiny atom shared by the management page and the panel registrations.
+     * `refresh()` dedupes concurrent calls; listeners are synchronous.
+     */
+    function createPluginStore() {
+      let snapshot = emptyListSnapshot()
+      let inFlight = null
+      const listeners = new Set()
+
+      const notify = () => {
+        for (const listener of Array.from(listeners)) {
+          try {
+            listener()
+          } catch (error) {
+            /* a listener must not break the store */
+          }
+        }
+      }
+      const setSnapshot = (next) => {
+        snapshot = next
+        notify()
+      }
+
+      async function refresh() {
+        if (inFlight) return inFlight
+        inFlight = (async () => {
+          const payload = await fetchJson('list')
+          if (!payload.ok) {
+            const previous = snapshot
+            setSnapshot(Object.assign({}, previous, {
+              status: previous.plugins.length ? 'stale' : 'error',
+              error: payload.error,
+            }))
+            return snapshot
+          }
+          const plugins = Array.isArray(payload.plugins) ? payload.plugins.map(normalizePlugin).filter(Boolean) : []
+          setSnapshot({
+            status: 'online',
+            plugins,
+            available: normalizeAvailable(payload),
+            store: typeof payload.store === 'string' ? payload.store : null,
+            hermesHome: typeof payload.hermesHome === 'string' ? payload.hermesHome : null,
+            hermesPluginsDir: typeof payload.hermesPluginsDir === 'string' ? payload.hermesPluginsDir : null,
+            webAssets: payload.webAssets !== false,
+            error: null,
+          })
+          return snapshot
+        })()
+          .catch((error) => {
+            setSnapshot(Object.assign({}, snapshot, {
+              status: snapshot.plugins.length ? 'stale' : 'error',
+              error: String((error && error.message) || error),
+            }))
+            return snapshot
+          })
+          .finally(() => {
+            inFlight = null
+          })
+        return inFlight
+      }
+
+      return {
+        getSnapshot: () => snapshot,
+        subscribe(listener) {
+          listeners.add(listener)
+          return () => {
+            listeners.delete(listener)
+          }
+        },
+        refresh,
+      }
+    }
+
+    const pluginStore = createPluginStore()
+
+    function storeGetPlugin(name) {
+      const plugins = pluginStore.getSnapshot().plugins
+      for (const plugin of plugins) {
+        if (plugin.name === name) return plugin
+      }
+      return null
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Panel registration diffing                                         */
+    /* ------------------------------------------------------------------ */
+
+    /** Panel id == sidebar id == key of the matching `main` registration. */
+    function panelIdFor(name) {
+      return `hermes:${String(name == null ? '' : name)}`
+    }
+
+    function desiredPanels(snapshot) {
+      const plugins = snapshot && Array.isArray(snapshot.plugins) ? snapshot.plugins : []
+      const result = []
+      let index = 0
+      for (const plugin of plugins) {
+        if (!plugin || plugin.hasDesktop !== true) continue
+        result.push({
+          id: panelIdFor(plugin.name),
+          name: plugin.name,
+          label: plugin.label || plugin.name,
+          order: 40 + index,
+        })
+        index += 1
+      }
+      return result
+    }
+
+    /** Add/remove `main` registrations so they mirror the installed list. */
+    function syncMainPanels(registered, desired, register) {
+      const wanted = new Set(desired.map((item) => item.id))
+      for (const [id, entry] of Array.from(registered)) {
+        if (wanted.has(id)) continue
+        try {
+          entry.disposer()
+        } catch (error) {
+          /* ignore */
+        }
+        registered.delete(id)
+      }
+      for (const item of desired) {
+        if (registered.has(item.id)) continue
+        registered.set(item.id, { disposer: register(item) })
+      }
+    }
+
+    /** Add/remove/reorder sidebar entries; re-registers on label/order change. */
+    function syncSidebarPanels(registered, desired, register) {
+      const wanted = new Map(desired.map((item) => [item.id, item]))
+      for (const [id, entry] of Array.from(registered)) {
+        const item = wanted.get(id)
+        if (!item) {
+          try {
+            entry.disposer()
+          } catch (error) {
+            /* ignore */
+          }
+          registered.delete(id)
+          continue
+        }
+        if (entry.label !== item.label || entry.order !== item.order) {
+          try {
+            entry.disposer()
+          } catch (error) {
+            /* ignore */
+          }
+          registered.delete(id)
+        }
+      }
+      for (const item of desired) {
+        if (registered.has(item.id)) continue
+        registered.set(item.id, {
+          disposer: register(item),
+          label: item.label,
+          order: item.order,
+        })
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Host bridge + session snapshot (plugin navigation)                  */
+    /* ------------------------------------------------------------------ */
+
+    function apiBaseFor() {
+      return routeMode === 'fallback' ? '/hermes-plugins' : '/api/hermes-plugins'
+    }
+
+    function useSessionBridgeRef(props) {
+      const ref = useRef(null)
+      let snapshot = null
+      try {
+        snapshot = props && typeof props.useSessions === 'function' ? props.useSessions() : null
+      } catch (error) {
+        snapshot = null
+      }
+      ref.current = snapshot
+      useEffect(() => {
+        sessionSnapshotRef = ref
+        return () => {
+          if (sessionSnapshotRef === ref) sessionSnapshotRef = null
+        }
+      }, [])
+    }
+
+    /**
+     * `api.host` merged over the runtime's built-in host. Members we can serve
+     * are supplied; anything omitted keeps the runtime's own fallback (a single
+     * warn toast), so a profile without `uiWorkspace` still works.
+     */
+    function makeHostBridge(uiWorkspace) {
+      const hostBridge = {}
+      if (uiWorkspace && typeof uiWorkspace.startSession === 'function') {
+        hostBridge.newChat = () => {
+          uiWorkspace.startSession()
+          return Promise.resolve()
+        }
+      }
+      if (uiWorkspace && typeof uiWorkspace.openSession === 'function') {
+        hostBridge.openSession = (sessionId) => {
+          const target = String(sessionId == null ? '' : sessionId)
+          const known = readSessionEntries().some((entry) => entry.id === target)
+          if (!known) throw new Error(TEXT.hostUnknownSession)
+          uiWorkspace.openSession(sessionId)
+        }
+      }
+      hostBridge.request = (method, params) => {
+        if (method === 'session.list') {
+          const entries = readSessionEntries().slice().sort((a, b) => b.updatedAt - a.updatedAt)
+          const requested = params && params.limit
+          const limit = Number.isFinite(Number(requested)) && Number(requested) > 0 ? Math.floor(Number(requested)) : 0
+          const chosen = limit ? entries.slice(0, limit) : entries
+          return Promise.resolve({
+            sessions: chosen.map((entry) => ({
+              session_id: entry.id,
+              id: entry.id,
+              title: entry.title,
+              updated_at: entry.updatedAt,
+            })),
+          })
+        }
+        throw new Error(TEXT.hostUnknownRequest(method))
+      }
+      return hostBridge
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* One lazy panel per installed plugin                                 */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Mounts a plugin's desktop half only when its `main` panel is selected.
+     * Owns exactly one runtime instance: the lifecycle effect below loads the
+     * source and disposes that instance on unmount or reload.
+     */
+    function PluginPanelHost(props) {
+      const pluginName = String((props && props.pluginName) || '')
+      const hostBridge = props && props.hostBridge ? props.hostBridge : {}
+      useSessionBridgeRef(props)
+      const [reloadToken, setReloadToken] = useState(0)
+      const [state, setState] = useState({ phase: 'loading', instance: null, error: null })
+
+      useEffect(() => {
+        let cancelled = false
+        let loadedInstance = null
+        setState({ phase: 'loading', instance: null, error: null })
+        ;(async () => {
+          try {
+            const plugin = storeGetPlugin(pluginName)
+            if (!plugin) throw new Error(TEXT.panelMissing)
+            const modules = await loadRuntimeModules()
+            const sourceText = await loadPluginSource(pluginName)
+            if (cancelled) return
+            const runtime = modules.createHermesRuntime({
+              React,
+              createSdk: modules.createSdk,
+              api: { rest, host: hostBridge },
+              apiBase: apiBaseFor(),
+            })
+            if (!runtime || typeof runtime.load !== 'function') throw new Error(TEXT.errors.noLoadMethod)
+            loadedInstance = await runtime.load(plugin, sourceText)
+            if (cancelled) {
+              disposeInstance(loadedInstance)
+              loadedInstance = null
+              return
+            }
+            setState({ phase: 'ready', instance: loadedInstance, error: null })
+          } catch (error) {
+            if (!cancelled) {
+              setState({ phase: 'error', instance: null, error: String((error && error.message) || error) })
+            }
+          }
+        })()
+        return () => {
+          cancelled = true
+          disposeInstance(loadedInstance)
+          loadedInstance = null
+        }
+      }, [pluginName, reloadToken, hostBridge])
+
+      const plugin = storeGetPlugin(pluginName)
+      const label = plugin ? plugin.label : pluginName
+
+      let body = null
+      if (state.phase === 'ready' && state.instance) {
+        body = h(
+          'div',
+          { className: 'hpx-panel-body' },
+          h(
+            PluginErrorBoundary,
+            { key: `${pluginName}:${reloadToken}` },
+            h('div', { className: 'hph-root' }, h(state.instance.Root)),
+          ),
+        )
+      } else if (state.phase === 'error') {
+        body = h(
+          'div',
+          { className: 'hpx-panel-state' },
+          h(
+            'div',
+            { className: 'hpx-error', role: 'alert' },
+            h(Icon, { name: 'alert', size: 14 }),
+            h(
+              'div',
+              { className: 'hpx-error-body' },
+              h('strong', null, TEXT.panelErrorTitle),
+              h('span', null, state.error),
+            ),
+          ),
+          h(
+            'button',
+            { className: 'hpx-btn hpx-btn-tiny', onClick: () => setReloadToken((value) => value + 1) },
+            TEXT.tryAgain,
+          ),
+        )
+      } else {
+        body = h(
+          'div',
+          { className: 'hpx-panel-state' },
+          h('span', { className: 'hpx-panel-spinner', 'aria-hidden': true }),
+          TEXT.panelLoading(label),
+        )
+      }
+
+      return h('div', { className: 'hpx-panel-page' }, h(StyleTag), body)
+    }
+
+    /* ------------------------------------------------------------------ */
+
+    function HermesPluginsPage(props) {
+      const store = (props && props.store) || pluginStore
+      const openPanel = props && typeof props.openPanel === 'function' ? props.openPanel : null
+      const [list, setList] = useState(() => store.getSnapshot())
       const [installSource, setInstallSource] = useState('')
       const [installing, setInstalling] = useState(false)
       const [installError, setInstallError] = useState(null)
       const [actionError, setActionError] = useState(null)
       const [busy, setBusy] = useState({})
       const [confirmRemove, setConfirmRemove] = useState(null)
-      const [running, setRunning] = useState(null)
-      const [runPhase, setRunPhase] = useState('idle')
-      const [runError, setRunError] = useState(null)
       const [flash, setFlash] = useState(null)
-
       const mountedRef = useRef(true)
-      /** Bumped on Stop/unmount/another Run so a stale async run disposes itself. */
-      const seqRef = useRef(0)
-      const runningRef = useRef(null)
 
-      const applyRunning = useCallback((entry) => {
-        runningRef.current = entry
-        activeInstance = entry ? entry.instance : null
-        setRunning(entry)
-      }, [])
-
-      const loadList = useCallback(async () => {
-        const payload = await fetchJson('list')
-        if (!mountedRef.current) return
-        if (!payload.ok) {
-          setList((previous) => Object.assign({}, previous, { status: previous.plugins.length ? 'stale' : 'error', error: payload.error }))
-          return
-        }
-        const plugins = Array.isArray(payload.plugins) ? payload.plugins.map(normalizePlugin).filter(Boolean) : []
-        setList({
-          status: 'online',
-          plugins,
-          available: normalizeAvailable(payload),
-          store: typeof payload.store === 'string' ? payload.store : null,
-          hermesHome: typeof payload.hermesHome === 'string' ? payload.hermesHome : null,
-          hermesPluginsDir: typeof payload.hermesPluginsDir === 'string' ? payload.hermesPluginsDir : null,
-          webAssets: payload.webAssets !== false,
-          error: null,
-        })
-      }, [])
-
-      /* Mount, poll, and dispose the plugin UI on unmount. */
+      /* Subscribe to the shared store and keep it fresh while this page is open
+         (mount, window focus, and every 15 s). Panels keep their own
+         registrations independent of this page being mounted. */
       useEffect(() => {
         mountedRef.current = true
-        loadList()
+        let unsubscribe = null
+        try {
+          unsubscribe = store.subscribe(() => {
+            if (mountedRef.current) setList(store.getSnapshot())
+          })
+        } catch (error) {
+          unsubscribe = null
+        }
+        store.refresh()
         const timer = setInterval(() => {
           try {
             if (typeof document !== 'undefined' && document.hidden) return
           } catch (error) {
-            /* ignore */
+            return
           }
-          loadList()
+          store.refresh()
         }, LIST_POLL_MS)
+        let onFocus = null
+        try {
+          if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+            onFocus = () => store.refresh()
+            window.addEventListener('focus', onFocus)
+          }
+        } catch (error) {
+          onFocus = null
+        }
         return () => {
           mountedRef.current = false
-          seqRef.current += 1
           clearInterval(timer)
-          disposeInstance(runningRef.current ? runningRef.current.instance : null)
-          runningRef.current = null
-          activeInstance = null
+          if (unsubscribe) unsubscribe()
+          if (onFocus) {
+            try {
+              window.removeEventListener('focus', onFocus)
+            } catch (error) {
+              /* ignore */
+            }
+          }
         }
-      }, [loadList])
-
-      /* Publish the session ref for `apply`'s host bridge. */
-      useEffect(() => {
-        sessionSnapshotRef = sessionsRef
-        return () => {
-          if (sessionSnapshotRef === sessionsRef) sessionSnapshotRef = null
-        }
-      }, [])
+      }, [store])
 
       /* Flash the freshly installed row, then stop. */
       useEffect(() => {
@@ -964,66 +1316,6 @@ window.__ModuleLoader__.load({
         const timer = setTimeout(() => setConfirmRemove(null), 6000)
         return () => clearTimeout(timer)
       }, [confirmRemove])
-
-      const stopRun = useCallback(
-        (name) => {
-          const current = runningRef.current
-          if (!current) return
-          if (name && current.name !== name) return
-          seqRef.current += 1
-          disposeInstance(current.instance)
-          applyRunning(null)
-          setRunPhase('idle')
-          setRunError(null)
-        },
-        [applyRunning],
-      )
-
-      const startRun = useCallback(
-        async (plugin, label) => {
-          const gen = seqRef.current + 1
-          seqRef.current = gen
-          const current = runningRef.current
-          if (current) {
-            disposeInstance(current.instance)
-            applyRunning(null)
-          }
-          setRunPhase('loading')
-          setRunError(null)
-          markBusy(setBusy, plugin.name, label)
-          try {
-            const [sourceText, modules] = await Promise.all([loadPluginSource(plugin.name), loadRuntimeModules()])
-            if (!mountedRef.current || gen !== seqRef.current) return
-            // The page owns carrier selection, so hand the runtime its REST transport.
-            const apiBase = routeMode === 'fallback' ? '/hermes-plugins' : '/api/hermes-plugins'
-            const runtime = modules.createHermesRuntime({
-              React,
-              createSdk: modules.createSdk,
-              api: { rest, host: hostBridge || {} },
-              apiBase,
-            })
-            if (!runtime || typeof runtime.load !== 'function') {
-              throw new Error(TEXT.errors.noLoadMethod)
-            }
-            const instance = await runtime.load(plugin, sourceText)
-            if (!mountedRef.current || gen !== seqRef.current) {
-              disposeInstance(instance)
-              return
-            }
-            if (!instance || !instance.Root) throw new Error(TEXT.errors.noRoot)
-            applyRunning({ name: plugin.name, label: plugin.label || plugin.name, instance, startedAt: Date.now(), info: plugin })
-            setRunPhase('ready')
-          } catch (error) {
-            if (mountedRef.current && gen === seqRef.current) {
-              setRunPhase('error')
-              setRunError(String((error && error.message) || error))
-            }
-          } finally {
-            if (mountedRef.current) clearBusy(setBusy, plugin.name)
-          }
-        },
-        [applyRunning, hostBridge],
-      )
 
       const submitInstall = useCallback(
         async (event) => {
@@ -1041,14 +1333,14 @@ window.__ModuleLoader__.load({
             if (!mountedRef.current) return
             setInstallSource('')
             if (payload.plugin && payload.plugin.name) setFlash(String(payload.plugin.name))
-            await loadList()
+            await store.refresh()
           } catch (error) {
             if (mountedRef.current) setInstallError(String((error && error.message) || error))
           } finally {
             if (mountedRef.current) setInstalling(false)
           }
         },
-        [installSource, installing, loadList],
+        [installSource, installing, store],
       )
 
       const removePlugin = useCallback(
@@ -1063,23 +1355,27 @@ window.__ModuleLoader__.load({
               return
             }
             if (!mountedRef.current) return
-            stopRun(plugin.name)
-            await loadList()
+            await store.refresh()
           } catch (error) {
             if (mountedRef.current) setActionError(String((error && error.message) || error))
           } finally {
             if (mountedRef.current) clearBusy(setBusy, plugin.name)
           }
         },
-        [loadList, stopRun],
+        [store],
+      )
+
+      const openPlugin = useCallback(
+        (plugin) => {
+          if (!openPanel || !plugin || plugin.hasDesktop !== true) return
+          openPanel(panelIdFor(plugin.name))
+        },
+        [openPanel],
       )
 
       const plugins = list.plugins
-      /** list.webAssets === false means web/runtime.js|sdk.js|sdk.css are missing. */
+      const loading = list.status === 'idle' || list.status === 'loading'
       const assetsReady = list.webAssets !== false
-      const runningEntry = running
-      const runningInList = runningEntry ? plugins.some((plugin) => plugin.name === runningEntry.name) : false
-      const runKey = runningEntry ? `${runningEntry.name}:${runningEntry.startedAt}` : 'none'
 
       return h(
         'div',
@@ -1098,7 +1394,7 @@ window.__ModuleLoader__.load({
               className: 'hpx-btn hpx-btn-icon',
               title: TEXT.refresh,
               'aria-label': TEXT.refresh,
-              onClick: () => loadList(),
+              onClick: () => store.refresh(),
             },
             h(Icon, { name: 'reload', size: 14 }),
           ),
@@ -1173,13 +1469,13 @@ window.__ModuleLoader__.load({
                 ),
                 h(
                   'button',
-                  { className: 'hpx-btn hpx-btn-tiny', onClick: () => loadList() },
+                  { className: 'hpx-btn hpx-btn-tiny', onClick: () => store.refresh() },
                   TEXT.retry,
                 ),
               )
             : null,
 
-          plugins.length === 0 && list.status === 'loading'
+          loading && plugins.length === 0
             ? h('div', { className: 'hpx-empty' }, TEXT.loading)
             : plugins.length === 0
               ? h('div', { className: 'hpx-empty' }, TEXT.empty)
@@ -1187,21 +1483,14 @@ window.__ModuleLoader__.load({
                   'div',
                   { className: 'hpx-list' },
                   plugins.map((plugin) => {
-                    const isRunning = !!runningEntry && runningEntry.name === plugin.name
                     const rowBusy = busy[plugin.name] || null
                     const confirm = confirmRemove === plugin.name
                     return h(
                       'article',
-                      {
-                        key: plugin.name,
-                        className: flash === plugin.name ? 'hpx-card is-flash' : 'hpx-card',
-                      },
+                      { key: plugin.name, className: flash === plugin.name ? 'hpx-card is-flash' : 'hpx-card' },
                       h(
                         'div',
                         { className: 'hpx-row-head' },
-                        isRunning
-                          ? h('span', { className: 'hpx-running-dot', title: TEXT.runningTitle(plugin.label) })
-                          : null,
                         h('span', { className: 'hpx-row-title', title: plugin.dir || plugin.name }, plugin.label),
                         plugin.version ? h('span', { className: 'hpx-version' }, `v${plugin.version}`) : null,
                         h(
@@ -1239,39 +1528,16 @@ window.__ModuleLoader__.load({
                       h(
                         'div',
                         { className: 'hpx-actions' },
-                        isRunning
-                          ? h(
-                              'button',
-                              {
-                                className: 'hpx-btn hpx-btn-tiny',
-                                disabled: !!rowBusy,
-                                onClick: () => stopRun(plugin.name),
-                                title: TEXT.titles.stop,
-                              },
-                              h(Icon, { name: 'stop', size: 12 }),
-                              TEXT.stop,
-                            )
-                          : h(
-                              'button',
-                              {
-                                className: 'hpx-btn hpx-btn-tiny hpx-btn-accent',
-                                disabled: !!rowBusy || !plugin.hasDesktop || !assetsReady,
-                                title: !assetsReady ? TEXT.runtimeMissing : plugin.hasDesktop ? TEXT.titles.run : TEXT.noDesktop,
-                                onClick: () => startRun(plugin, 'run'),
-                              },
-                              h(Icon, { name: 'play', size: 12 }),
-                              rowBusy === 'run' ? TEXT.starting : TEXT.run,
-                            ),
                         h(
                           'button',
                           {
-                            className: 'hpx-btn hpx-btn-tiny',
-                            disabled: !!rowBusy || !isRunning,
-                            title: isRunning ? TEXT.titles.reload : TEXT.titles.reloadDisabled,
-                            onClick: () => startRun(plugin, 'reload'),
+                            className: 'hpx-btn hpx-btn-tiny hpx-btn-accent',
+                            disabled: !plugin.hasDesktop,
+                            title: plugin.hasDesktop ? TEXT.titles.open : TEXT.noDesktop,
+                            onClick: () => openPlugin(plugin),
                           },
-                          h(Icon, { name: 'reload', size: 12 }),
-                          rowBusy === 'reload' ? TEXT.starting : TEXT.reload,
+                          h(Icon, { name: 'open', size: 12 }),
+                          TEXT.open,
                         ),
                         h(
                           'button',
@@ -1354,7 +1620,7 @@ window.__ModuleLoader__.load({
                                       return
                                     }
                                     if (payload.plugin && payload.plugin.name) setFlash(String(payload.plugin.name))
-                                    return loadList()
+                                    return store.refresh()
                                   })
                                   .catch((error) => {
                                     if (mountedRef.current) setInstallError(String((error && error.message) || error))
@@ -1382,70 +1648,6 @@ window.__ModuleLoader__.load({
               )
             : null,
 
-          /* Running plugin: its own UI, full width, below the list. */
-          h(
-            'div',
-            { className: 'hpx-run' },
-            h(
-              'div',
-              { className: 'hpx-run-head' },
-              h(Icon, { name: 'plugins', size: 14 }),
-              h(
-                'span',
-                { className: 'hpx-run-title' },
-                runningEntry ? TEXT.runningTitle(runningEntry.label) : TEXT.runFrameLabel,
-              ),
-              runningEntry ? h('span', { className: 'hpx-pill' }, runningEntry.name) : null,
-              h('div', { className: 'hpx-grow' }),
-              runningEntry
-                ? h(
-                    'button',
-                    {
-                      className: 'hpx-btn hpx-btn-tiny',
-                      disabled: !!busy[runningEntry.name],
-                      title: TEXT.titles.reload,
-                      onClick: () => {
-                        const info = runningEntry.info || plugins.find((plugin) => plugin.name === runningEntry.name)
-                        if (info) startRun(info, 'reload')
-                      },
-                    },
-                    h(Icon, { name: 'reload', size: 12 }),
-                    TEXT.reload,
-                  )
-                : null,
-              runningEntry
-                ? h(
-                    'button',
-                    { className: 'hpx-btn hpx-btn-tiny', onClick: () => stopRun(runningEntry.name) },
-                    h(Icon, { name: 'stop', size: 12 }),
-                    TEXT.stop,
-                  )
-                : null,
-            ),
-            runPhase === 'loading' ? h('div', { className: 'hpx-empty' }, TEXT.runLoading) : null,
-            runError
-              ? h(
-                  'div',
-                  { className: 'hpx-error', role: 'alert' },
-                  h(Icon, { name: 'alert', size: 14 }),
-                  h('div', { className: 'hpx-error-body' }, h('strong', null, TEXT.crash), h('span', null, runError)),
-                )
-              : null,
-            runningEntry
-              ? h(
-                  'div',
-                  { className: 'hpx-run-frame' },
-                  h(
-                    PluginErrorBoundary,
-                    { key: runKey },
-                    h('div', { className: 'hph-root' }, h(runningEntry.instance.Root)),
-                  ),
-                )
-              : !runningInList && runPhase === 'idle'
-                ? h('div', { className: 'hpx-empty' }, TEXT.runHint)
-                : null,
-          ),
-
           h(
             'div',
             { className: 'hpx-foot' },
@@ -1469,90 +1671,103 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         const layout = ctx.layout || (typeof ctx.get === 'function' ? ctx.get('layout') : undefined)
         const uiWorkspace = ctx.uiWorkspace || (typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined)
-        const openPage = () => {
+        const openPanel = (panelId) => {
           try {
             if (layout && typeof layout.selectPanel === 'function') {
-              layout.selectPanel(PANEL_ID)
+              layout.selectPanel(panelId)
               return
             }
           } catch (error) {
             /* fall through to the hash hint */
           }
           try {
-            window.location.hash = `#${PANEL_ID}`
+            window.location.hash = `#${panelId}`
           } catch (error) {
             /* ignore */
           }
         }
 
-        /* `api.host` is merged over the runtime's built-in host member by member.
-           Members we can really serve are supplied; anything omitted (for example
-           when `uiWorkspace` is absent in this profile) keeps the runtime's own
-           fallback, which warns once as a toast. */
-        const hostBridge = {}
-        if (uiWorkspace && typeof uiWorkspace.startSession === 'function') {
-          hostBridge.newChat = () => {
-            uiWorkspace.startSession()
-            return Promise.resolve()
-          }
-        }
-        if (uiWorkspace && typeof uiWorkspace.openSession === 'function') {
-          // `async` on purpose: a failure must be a REJECTION, not a synchronous
-          // throw. Plugins guard this call as `Promise.resolve(host.openSession(x))
-          // .catch(...)` — a sync throw skips that catch entirely and escapes
-          // uncaught instead of surfacing as an error toast.
-          hostBridge.openSession = async (sessionId) => {
-            const target = String(sessionId == null ? '' : sessionId)
-            const known = readSessionEntries().some((entry) => entry.id === target)
-            if (!known) throw new Error(TEXT.hostUnknownSession)
-            uiWorkspace.openSession(sessionId)
-          }
-        }
-        // `async` for the same reason: callers await this inside a try/catch.
-        hostBridge.request = async (method, params) => {
-          if (method === 'session.list') {
-            const entries = readSessionEntries().slice().sort((a, b) => b.updatedAt - a.updatedAt)
-            const requested = params && params.limit
-            const limit = Number.isFinite(Number(requested)) && Number(requested) > 0 ? Math.floor(Number(requested)) : 0
-            const chosen = limit ? entries.slice(0, limit) : entries
-            return {
-              sessions: chosen.map((entry) => ({
-                session_id: entry.id,
-                id: entry.id,
-                title: entry.title,
-                updated_at: entry.updatedAt,
-              })),
+        const hostBridge = makeHostBridge(uiWorkspace)
+
+        /* Prime the store; the inject callbacks below register from its snapshot
+           and re-register on every change, so panels appear without a reload. */
+        pluginStore.refresh()
+
+        /* One effect owns every `main` registration: the management page plus one
+           lazy panel per installed plugin that has a desktop half. */
+        ctx.slots.inject('main', () => {
+          const registered = new Map()
+          const register = (item) =>
+            ctx.slots.register(
+              { name: 'main', key: item.id },
+              (slotProps) => h(PluginPanelHost, Object.assign({}, slotProps, { pluginName: item.name, hostBridge })),
+            )
+          const management = ctx.slots.register(
+            { name: 'main', key: PANEL_ID },
+            (slotProps) => h(HermesPluginsPage, Object.assign({}, slotProps, { store: pluginStore, openPanel })),
+          )
+          const sync = () => syncMainPanels(registered, desiredPanels(pluginStore.getSnapshot()), register)
+          sync()
+          const unsubscribe = pluginStore.subscribe(sync)
+          return () => {
+            unsubscribe()
+            for (const entry of Array.from(registered.values())) {
+              try {
+                entry.disposer()
+              } catch (error) {
+                /* ignore */
+              }
+            }
+            registered.clear()
+            try {
+              management()
+            } catch (error) {
+              /* ignore */
             }
           }
-          throw new Error(TEXT.hostUnknownRequest(method))
-        }
+        })
 
-        /* The page itself: `main` is keyed by the sidebar entry id. The host
-           bridge is passed as an extra prop because it is built here in apply. */
-        ctx.slots.inject('main', () =>
-          ctx.slots.register(
-            { name: 'main', key: PANEL_ID },
-            (slotProps) => h(HermesPluginsPage, Object.assign({}, slotProps, { hostBridge })),
-          ),
-        )
-
-        /* Sidebar entry; the shell selects `main` with this id when clicked. */
-        ctx.slots.inject('sidebar.panellist', () =>
-          ctx.slots.register(
+        /* Same for the sidebar: management entry (order 30) plus one coloured
+           icon per installed desktop plugin (orders 40, 41, ...). */
+        ctx.slots.inject('sidebar.panellist', () => {
+          const registered = new Map()
+          const register = (item) =>
+            ctx.slots.register(
+              { name: 'sidebar.panellist', id: item.id, order: item.order, label: item.label },
+              (slotProps) => h(PluginIcon, Object.assign({}, slotProps, { name: item.name, open: () => openPanel(item.id) })),
+            )
+          const management = ctx.slots.register(
             { name: 'sidebar.panellist', id: ENTRY_ID, order: 30, label: TEXT.title },
-            (props) => h(PanelIcon, Object.assign({}, props, { open: openPage })),
-          ),
-        )
+            (slotProps) => h(PanelIcon, Object.assign({}, slotProps, { open: () => openPanel(PANEL_ID) })),
+          )
+          const sync = () => syncSidebarPanels(registered, desiredPanels(pluginStore.getSnapshot()), register)
+          sync()
+          const unsubscribe = pluginStore.subscribe(sync)
+          return () => {
+            unsubscribe()
+            for (const entry of Array.from(registered.values())) {
+              try {
+                entry.disposer()
+              } catch (error) {
+                /* ignore */
+              }
+            }
+            registered.clear()
+            try {
+              management()
+            } catch (error) {
+              /* ignore */
+            }
+          }
+        })
 
-        /* Own the SDK stylesheet and any live instance for this plugin's lifetime. */
+        /* The SDK stylesheet is app-wide; panels dispose their own instances. */
         try {
           ctx.effect(() => () => {
-            disposeInstance(activeInstance)
-            activeInstance = null
             removeSdkStyle()
           })
         } catch (error) {
-          /* ctx.effect absent in older harness builds: still dispose on unload best-effort. */
+          /* ctx.effect absent in older harness builds: nothing to own here. */
         }
       },
     }
