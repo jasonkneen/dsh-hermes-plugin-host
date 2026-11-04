@@ -1,0 +1,33 @@
+{
+  "name": "@local/hermes-plugin-host",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Install and run Hermes Desktop plugins inside DeepSeek Harness: a Hermes Plugins page, an @hermes/plugin-sdk runtime, and a Python FastAPI sidecar for plugin backends.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "lib/**",
+    "client.js",
+    "web/**",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CONTRACT.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

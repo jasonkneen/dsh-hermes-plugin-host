@@ -1,0 +1,1280 @@
+/* ==========================================================================
+   hermes-plugin-host — web/sdk.css
+   --------------------------------------------------------------------------
+   Styling for Hermes Desktop plugin markup rendered inside the DeepSeek
+   Harness Web UI.
+
+   Hermes plugins are authored against Tailwind utility classes plus the
+   host's `--ui-*` custom properties. DSH has no Tailwind build (and we must
+   not depend on one), so this file provides:
+
+     1. the `--ui-*` → `--dsw-alias-*` theme bridge (scoped to `.hph-root`),
+     2. the host chrome the runtime renders (tabs, status bar, toasts,
+        error cards, empty states, skeletons),
+     3. the shim components' `hph-*` styles, and
+     4. exactly the utility classes Hermes plugin sources actually use
+        (extracted from hermes-desktop-plugin-office-3d/desktop/plugin.js).
+
+   Everything is scoped under `.hph-root`, so no host styling leaks out and
+   no host token is redefined globally.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Theme bridge
+   `--ui-*` names below are the ones actually referenced by the office-3d
+   plugin (and the wider Hermes plugin family):
+     --ui-text, --ui-text-primary|secondary|tertiary,
+     --ui-bg, --ui-bg-elevated, --ui-stroke, --ui-stroke-secondary,
+     --ui-border, --ui-accent
+   DSH aliases are read from the live theme, so light/dark follow the host
+   automatically — no `.dark` class juggling.
+   -------------------------------------------------------------------------- */
+.hph-root {
+  --ui-text: var(--dsw-alias-label-primary, #e6e8ea);
+  --ui-text-primary: var(--dsw-alias-label-primary, #e6e8ea);
+  --ui-text-secondary: var(--dsw-alias-label-secondary, #b4b9c0);
+  --ui-text-tertiary: var(--dsw-alias-label-tertiary, #8b9098);
+  --ui-text-quaternary: var(--dsw-alias-label-quaternary, #6b7078);
+
+  --ui-bg: var(--dsw-alias-bg-base, #16181c);
+  --ui-bg-elevated: var(--dsw-alias-bg-layer-1, #1d2025);
+  --ui-bg-sunken: var(--dsw-alias-bg-layer-2, #14161a);
+  --ui-bg-layer-3: var(--dsw-alias-bg-layer-3, #262a30);
+
+  --ui-stroke: var(--dsw-alias-border-l2, #2f343b);
+  --ui-stroke-secondary: var(--dsw-alias-border-l1, #272b31);
+  --ui-border: var(--dsw-alias-border-l1, #272b31);
+
+  --ui-accent: var(--dsw-alias-brand-primary, #4c9aff);
+  --ui-accent-fg: var(--dsw-alias-brand-text, #ffffff);
+  --ui-error: var(--dsw-alias-state-error-primary, #f2555a);
+  --ui-warn: var(--dsw-alias-state-warn-primary, #e2a03f);
+  --ui-success: var(--dsw-alias-state-success-primary, #45b26b);
+
+  --hph-font: var(--dsw-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
+  --hph-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--ui-text);
+  background: var(--ui-bg);
+  font-family: var(--hph-font);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.hph-root *,
+.hph-root *::before,
+.hph-root *::after {
+  box-sizing: border-box;
+}
+
+/* Element resets use :where() so utilities always win (zero specificity). */
+.hph-root :where(button) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.hph-root :where(button:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.hph-root :where(h1, h2, h3, h4, h5, h6, p, figure, blockquote) {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.hph-root :where(a) {
+  color: var(--ui-accent);
+  text-decoration: none;
+}
+
+.hph-root :where(a:hover) {
+  text-decoration: underline;
+}
+
+.hph-root :where(ul, ol) {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hph-root :where(canvas) {
+  display: block;
+}
+
+.hph-root :where(pre, code) {
+  font-family: var(--hph-mono);
+}
+
+.hph-root :where(input, textarea, select) {
+  font: inherit;
+  color: inherit;
+}
+
+.hph-root :where(input[type="text"], input[type="number"], textarea, select) {
+  padding: 4px 8px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 6px;
+  background: var(--ui-bg-elevated);
+}
+
+.hph-root :where(input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible) {
+  outline: 2px solid var(--dsw-focus-ring-color, var(--ui-accent));
+  outline-offset: 1px;
+}
+
+/* Scrollbars inside plugin surfaces. */
+.hph-root ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.hph-root ::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+  background-color: var(--dsw-alias-scrollbar-bg-l1, rgba(127, 127, 127, 0.35));
+}
+
+.hph-root ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--dsw-alias-scrollbar-hover-l1, rgba(127, 127, 127, 0.5));
+}
+
+.hph-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   2. Host chrome rendered by web/runtime.js
+   -------------------------------------------------------------------------- */
+
+/* The page slot the active route renders into. */
+.hph-route {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* In-page tab bar — only rendered when a plugin registers >1 routable path. */
+.hph-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--ui-stroke-secondary);
+  background: var(--ui-bg);
+  overflow-x: auto;
+}
+
+.hph-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--ui-text-tertiary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.hph-tab:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.1));
+  color: var(--ui-text-secondary);
+}
+
+.hph-tab-active,
+.hph-tab-active:hover {
+  background: var(--ui-bg-layer-3);
+  color: var(--ui-text);
+}
+
+.hph-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* Status-bar surfaces (STATUSBAR_AREAS.left / .right). */
+.hph-statusbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-top: 1px solid var(--ui-stroke-secondary);
+  background: var(--ui-bg);
+  font-size: 0.6875rem;
+  color: var(--ui-text-tertiary);
+}
+
+.hph-statusbar-left,
+.hph-statusbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  min-height: 28px;
+}
+
+.hph-statusbar > * {
+  min-width: 0;
+}
+
+/* Toasts raised through sdk.host.notify / notifyError. */
+.hph-toasts {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: min(360px, calc(100% - 24px));
+  pointer-events: none;
+}
+
+.hph-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 8px 8px 10px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--dsw-alias-toast-bg, var(--ui-bg-elevated));
+  color: var(--dsw-alias-toast-label, var(--ui-text));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  pointer-events: auto;
+  animation: hph-toast-in 140ms ease-out;
+}
+
+@keyframes hph-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.hph-toast-info {
+  border-left-color: var(--ui-accent);
+}
+
+.hph-toast-success {
+  border-left-color: var(--ui-success);
+}
+
+.hph-toast-warn {
+  border-left-color: var(--ui-warn);
+}
+
+.hph-toast-error {
+  border-left-color: var(--ui-error);
+}
+
+.hph-toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hph-toast-title {
+  font-weight: 600;
+  color: var(--ui-text);
+}
+
+.hph-toast-msg {
+  color: var(--ui-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.hph-toast-action {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 5px;
+  color: var(--ui-accent);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.hph-toast-action:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+.hph-toast-close {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  color: var(--ui-text-tertiary);
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
+.hph-toast-close:hover {
+  color: var(--ui-text);
+}
+
+/* Crash / load-failure card — a plugin must never blank the page. */
+.hph-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--ui-error) 45%, transparent);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ui-error) 8%, var(--ui-bg-elevated));
+  color: var(--ui-text);
+  font-size: 0.75rem;
+}
+
+.hph-error-banner {
+  margin: 8px 12px 0;
+}
+
+.hph-error-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ui-text);
+}
+
+.hph-error-msg {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ui-bg-sunken) 70%, transparent);
+  color: var(--ui-text-secondary);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hph-error-phase {
+  color: var(--ui-text-tertiary);
+  font-size: 0.6875rem;
+}
+
+.hph-error-stack > summary {
+  cursor: pointer;
+  color: var(--ui-text-tertiary);
+  font-size: 0.6875rem;
+}
+
+.hph-error-stack pre {
+  max-height: 220px;
+  margin: 6px 0 0;
+  overflow: auto;
+  color: var(--ui-text-tertiary);
+  font-size: 0.6875rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hph-error-retry {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 6px;
+  color: var(--ui-text-secondary);
+  font-size: 0.6875rem;
+}
+
+.hph-error-retry:hover {
+  color: var(--ui-text);
+  background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+/* --------------------------------------------------------------------------
+   3. Shim components (hph-*)
+   -------------------------------------------------------------------------- */
+
+/* Skeleton */
+.hph-skeleton {
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-skeleton, var(--ui-bg-layer-3));
+  animation: hph-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes hph-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ListRow */
+.hph-listrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--ui-stroke-secondary);
+  text-align: left;
+}
+
+.hph-listrow:last-child {
+  border-bottom: 0;
+}
+
+.hph-listrow:first-child {
+  padding-top: 4px;
+}
+
+.hph-listrow-clickable:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, 0.08));
+}
+
+.hph-listrow-selected {
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+}
+
+.hph-listrow-disabled {
+  opacity: 0.55;
+}
+
+.hph-listrow-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  color: var(--ui-text-tertiary);
+}
+
+.hph-listrow-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hph-listrow-title {
+  color: var(--ui-text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.hph-listrow-desc {
+  color: var(--ui-text-tertiary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.hph-listrow-action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+/* ToggleRow */
+.hph-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--ui-stroke-secondary);
+}
+
+.hph-toggle-row:last-child {
+  border-bottom: 0;
+}
+
+.hph-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--ui-bg-layer-3);
+  border: 1px solid var(--ui-stroke-secondary);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.hph-switch-on {
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+
+.hph-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--dsw-alias-switch-thumb, #ffffff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 120ms ease;
+}
+
+.hph-switch-on .hph-switch-thumb {
+  transform: translateX(14px);
+}
+
+/* SegmentedControl */
+.hph-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 7px;
+  background: var(--ui-bg-sunken);
+}
+
+.hph-segment {
+  padding: 2px 9px;
+  border-radius: 5px;
+  color: var(--ui-text-tertiary);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.hph-segment:hover {
+  color: var(--ui-text-secondary);
+}
+
+.hph-segment-active,
+.hph-segment-active:hover {
+  background: var(--ui-bg-layer-3);
+  color: var(--ui-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+/* Tip (tooltip) */
+.hph-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+}
+
+.hph-tip[data-tip]:not([data-tip=""])::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  z-index: 50;
+  width: max-content;
+  max-width: 300px;
+  padding: 5px 8px;
+  border: 1px solid var(--ui-stroke-secondary);
+  border-radius: 6px;
+  background: var(--dsw-alias-tooltip-bg, var(--ui-bg-elevated));
+  color: var(--dsw-alias-label-primary, var(--ui-text));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: normal;
+  transform: translateX(-50%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 100ms ease 220ms, visibility 0s linear 320ms;
+}
+
+.hph-tip[data-tip]:not([data-tip=""]):hover::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 220ms, 0s;
+}
+
+/* EmptyState */
+.hph-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 32px 20px;
+  color: var(--ui-text-secondary);
+  text-align: center;
+}
+
+.hph-empty-icon {
+  color: var(--ui-text-tertiary);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.hph-empty-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ui-text);
+}
+
+.hph-empty-desc {
+  max-width: 46ch;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--ui-text-tertiary);
+}
+
+.hph-empty-action {
+  margin-top: 6px;
+}
+
+/* ErrorState */
+.hph-state-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--ui-error) 40%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ui-error) 7%, var(--ui-bg-elevated));
+}
+
+.hph-state-error-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hph-state-error-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ui-error);
+}
+
+/* --------------------------------------------------------------------------
+   4. Tailwind utilities used by Hermes plugin sources
+   (hermes-desktop-plugin-office-3d/desktop/plugin.js). Scoped under
+   `.hph-root` so a plugin can never restyle the host shell.
+   -------------------------------------------------------------------------- */
+
+/* --- display / positioning ------------------------------------------------ */
+.hph-root .block {
+  display: block;
+}
+
+.hph-root .inline-block {
+  display: inline-block;
+}
+
+.hph-root .flex {
+  display: flex;
+}
+
+.hph-root .inline-flex {
+  display: inline-flex;
+}
+
+.hph-root .grid {
+  display: grid;
+}
+
+.hph-root .relative {
+  position: relative;
+}
+
+.hph-root .absolute {
+  position: absolute;
+}
+
+.hph-root .top-2 {
+  top: 0.5rem;
+}
+
+.hph-root .right-2 {
+  right: 0.5rem;
+}
+
+.hph-root .bottom-2 {
+  bottom: 0.5rem;
+}
+
+.hph-root .left-2 {
+  left: 0.5rem;
+}
+
+/* --- flex / grid ---------------------------------------------------------- */
+.hph-root .flex-col {
+  flex-direction: column;
+}
+
+.hph-root .flex-wrap {
+  flex-wrap: wrap;
+}
+
+.hph-root .flex-1 {
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+.hph-root .shrink-0 {
+  flex-shrink: 0;
+}
+
+.hph-root .items-start {
+  align-items: flex-start;
+}
+
+.hph-root .items-center {
+  align-items: center;
+}
+
+.hph-root .items-baseline {
+  align-items: baseline;
+}
+
+.hph-root .justify-between {
+  justify-content: space-between;
+}
+
+.hph-root .grid-cols-1 {
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+.hph-root .grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* --- gap ------------------------------------------------------------------ */
+.hph-root .gap-0\.5 {
+  gap: 0.125rem;
+}
+
+.hph-root .gap-1 {
+  gap: 0.25rem;
+}
+
+.hph-root .gap-2 {
+  gap: 0.5rem;
+}
+
+.hph-root .gap-2\.5 {
+  gap: 0.625rem;
+}
+
+.hph-root .gap-3 {
+  gap: 0.75rem;
+}
+
+/* --- padding -------------------------------------------------------------- */
+.hph-root .p-3 {
+  padding: 0.75rem;
+}
+
+.hph-root .p-4 {
+  padding: 1rem;
+}
+
+.hph-root .px-0\.5 {
+  padding-left: 0.125rem;
+  padding-right: 0.125rem;
+}
+
+.hph-root .px-1\.5 {
+  padding-left: 0.375rem;
+  padding-right: 0.375rem;
+}
+
+.hph-root .px-2 {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+.hph-root .px-2\.5 {
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
+}
+
+.hph-root .px-3 {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.hph-root .py-0\.5 {
+  padding-top: 0.125rem;
+  padding-bottom: 0.125rem;
+}
+
+.hph-root .py-1 {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.hph-root .py-2 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.hph-root .pt-0\.5 {
+  padding-top: 0.125rem;
+}
+
+/* --- sizing --------------------------------------------------------------- */
+.hph-root .w-full {
+  width: 100%;
+}
+
+.hph-root .h-full {
+  height: 100%;
+}
+
+.hph-root .w-2 {
+  width: 0.5rem;
+}
+
+.hph-root .w-2\.5 {
+  width: 0.625rem;
+}
+
+.hph-root .w-4 {
+  width: 1rem;
+}
+
+.hph-root .h-2 {
+  height: 0.5rem;
+}
+
+.hph-root .h-2\.5 {
+  height: 0.625rem;
+}
+
+.hph-root .min-w-0 {
+  min-width: 0;
+}
+
+.hph-root .min-h-0 {
+  min-height: 0;
+}
+
+.hph-root .max-w-full {
+  max-width: 100%;
+}
+
+.hph-root .min-w-\[3\.4rem\] {
+  min-width: 3.4rem;
+}
+
+.hph-root .h-\[420px\] {
+  height: 420px;
+}
+
+.hph-root .min-h-\[380px\] {
+  min-height: 380px;
+}
+
+.hph-root .max-h-\[360px\] {
+  max-height: 360px;
+}
+
+/* --- typography ----------------------------------------------------------- */
+.hph-root .text-xs {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.hph-root .text-sm {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.hph-root .text-lg {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.hph-root .text-\[10px\] {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.hph-root .text-\[0\.6875rem\] {
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+.hph-root .font-medium {
+  font-weight: 500;
+}
+
+.hph-root .font-semibold {
+  font-weight: 600;
+}
+
+.hph-root .leading-none {
+  line-height: 1;
+}
+
+.hph-root .leading-snug {
+  line-height: 1.375;
+}
+
+.hph-root .text-left {
+  text-align: left;
+}
+
+.hph-root .text-center {
+  text-align: center;
+}
+
+.hph-root .text-right {
+  text-align: right;
+}
+
+.hph-root .tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.hph-root .truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hph-root .select-none {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* --- colour: arbitrary --ui-* values ------------------------------------- */
+.hph-root .text-\[var\(--ui-text-secondary\)\] {
+  color: var(--ui-text-secondary);
+}
+
+.hph-root .text-\[var\(--ui-text-tertiary\)\] {
+  color: var(--ui-text-tertiary);
+}
+
+.hph-root .text-\[var\(--ui-accent\)\] {
+  color: var(--ui-accent);
+}
+
+/* Tailwind v4 parenthesis form: text-(--ui-text-tertiary) */
+.hph-root .text-\(--ui-text-tertiary\) {
+  color: var(--ui-text-tertiary);
+}
+
+.hph-root .hover\:text-\(--ui-text-secondary\):hover {
+  color: var(--ui-text-secondary);
+}
+
+.hph-root .hover\:text-\[var\(--ui-text-secondary\)\]:hover {
+  color: var(--ui-text-secondary);
+}
+
+.hph-root .hover\:text-\[var\(--ui-text\)\]:hover {
+  color: var(--ui-text);
+}
+
+.hph-root .hover\:text-\[var\(--ui-bg\)\]:hover {
+  color: var(--ui-bg);
+}
+
+/* --- backgrounds ---------------------------------------------------------- */
+.hph-root .bg-\[var\(--ui-bg\)\] {
+  background-color: var(--ui-bg);
+}
+
+.hph-root .bg-\[var\(--ui-accent\)\]\/15 {
+  background-color: color-mix(in srgb, var(--ui-accent) 15%, transparent);
+}
+
+.hph-root .hover\:bg-\[var\(--ui-bg\)\]:hover {
+  background-color: var(--ui-bg);
+}
+
+.hph-root .hover\:bg-\[var\(--ui-accent\)\]:hover {
+  background-color: var(--ui-accent);
+}
+
+.hph-root .hover\:bg-\[rgba\(127\,127\,127\,0\.18\)\]:hover {
+  background-color: rgba(127, 127, 127, 0.18);
+}
+
+.hph-root .active\:bg-\[rgba\(127\,127\,127\,0\.28\)\]:active {
+  background-color: rgba(127, 127, 127, 0.28);
+}
+
+/* --- borders / radius / shadow ------------------------------------------- */
+.hph-root .border {
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--ui-stroke-secondary);
+}
+
+.hph-root .border-\[var\(--ui-stroke-secondary\)\] {
+  border-color: var(--ui-stroke-secondary);
+}
+
+.hph-root .border-\[var\(--ui-accent\)\] {
+  border-color: var(--ui-accent);
+}
+
+.hph-root .rounded {
+  border-radius: 0.25rem;
+}
+
+.hph-root .rounded-md {
+  border-radius: 0.375rem;
+}
+
+.hph-root .rounded-full {
+  border-radius: 9999px;
+}
+
+.hph-root .shadow-sm {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+/* --- overflow / pointer / cursor ----------------------------------------- */
+.hph-root .overflow-y-auto {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hph-root .pointer-events-none {
+  pointer-events: none;
+}
+
+.hph-root .cursor-grab {
+  cursor: grab;
+}
+
+.hph-root .cursor-grabbing {
+  cursor: grabbing;
+}
+
+/* --- responsive ----------------------------------------------------------- */
+@media (min-width: 640px) {
+  .hph-root .sm\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .hph-root .lg\:grid-cols-\[minmax\(0\,1fr\)_300px\] {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   5. Utility extras
+   Small, obviously-safe additions for the wider Hermes plugin family. They
+   only define the same Tailwind names with their Tailwind values.
+   -------------------------------------------------------------------------- */
+.hph-root .hidden {
+  display: none;
+}
+
+.hph-root .static {
+  position: static;
+}
+
+.hph-root .inset-0 {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.hph-root .flex-grow {
+  flex-grow: 1;
+}
+
+.hph-root .items-end {
+  align-items: flex-end;
+}
+
+.hph-root .items-stretch {
+  align-items: stretch;
+}
+
+.hph-root .justify-center {
+  justify-content: center;
+}
+
+.hph-root .justify-start {
+  justify-content: flex-start;
+}
+
+.hph-root .justify-end {
+  justify-content: flex-end;
+}
+
+.hph-root .gap-4 {
+  gap: 1rem;
+}
+
+.hph-root .p-1 {
+  padding: 0.25rem;
+}
+
+.hph-root .p-2 {
+  padding: 0.5rem;
+}
+
+.hph-root .px-4 {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.hph-root .py-1\.5 {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+.hph-root .mt-1 {
+  margin-top: 0.25rem;
+}
+
+.hph-root .mt-2 {
+  margin-top: 0.5rem;
+}
+
+.hph-root .mb-1 {
+  margin-bottom: 0.25rem;
+}
+
+.hph-root .mb-2 {
+  margin-bottom: 0.5rem;
+}
+
+.hph-root .ml-auto {
+  margin-left: auto;
+}
+
+.hph-root .w-3 {
+  width: 0.75rem;
+}
+
+.hph-root .h-3 {
+  height: 0.75rem;
+}
+
+.hph-root .w-5 {
+  width: 1.25rem;
+}
+
+.hph-root .h-5 {
+  height: 1.25rem;
+}
+
+.hph-root .max-w-\[420px\] {
+  max-width: 420px;
+}
+
+.hph-root .text-base {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.hph-root .font-bold {
+  font-weight: 700;
+}
+
+.hph-root .italic {
+  font-style: italic;
+}
+
+.hph-root .uppercase {
+  text-transform: uppercase;
+}
+
+.hph-root .whitespace-nowrap {
+  white-space: nowrap;
+}
+
+.hph-root .break-words {
+  overflow-wrap: break-word;
+}
+
+.hph-root .overflow-hidden {
+  overflow: hidden;
+}
+
+.hph-root .rounded-lg {
+  border-radius: 0.5rem;
+}
+
+.hph-root .rounded-sm {
+  border-radius: 0.125rem;
+}
+
+.hph-root .border-b {
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+}
+
+.hph-root .border-t {
+  border-top-width: 1px;
+  border-top-style: solid;
+}
+
+.hph-root .border-\[var\(--ui-border\)\] {
+  border-color: var(--ui-border);
+}
+
+.hph-root .bg-\[var\(--ui-bg-elevated\)\] {
+  background-color: var(--ui-bg-elevated);
+}
+
+.hph-root .text-\[var\(--ui-text\)\] {
+  color: var(--ui-text);
+}
+
+.hph-root .opacity-60 {
+  opacity: 0.6;
+}
+
+.hph-root .transition {
+  transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
+}

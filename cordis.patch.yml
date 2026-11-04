@@ -1,0 +1,5 @@
+# Inserts the Hermes Plugin Host row. The same row carries the browser half
+# declared by this package's `dsh.client` block.
+- insert:
+    - id: hermes-plugin-host
+      name: '@local/hermes-plugin-host'
