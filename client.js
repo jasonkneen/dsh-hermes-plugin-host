@@ -98,6 +98,7 @@ window.__ModuleLoader__.load({
       backendNotMounted: (status) => `The plugin backend route is not mounted (HTTP ${status}).`,
       panelLoading: (label) => `Loading ${label}…`,
       panelErrorTitle: 'This plugin panel could not start',
+      bootError: 'The plugin page caught a startup error (the app still booted):',
       crash: 'The plugin UI crashed',
       crashHint: 'Its render threw. Use Try again to restart the panel — the rest of the app stays usable.',
       panelMissing: 'This plugin is no longer installed.',
@@ -2243,6 +2244,24 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
+          /* Boot-time failures are contained (see recordBootError) but must be
+             visible: this block only appears if this client entry caught one. */
+          bootErrors.length > 0
+            ? h(
+                'div',
+                { className: 'hpx-inline-error', role: 'alert' },
+                h(Icon, { name: 'alert', size: 14 }),
+                h(
+                  'span',
+                  null,
+                  TEXT.bootError +
+                    ' ' +
+                    bootErrors
+                      .map((entry) => entry.where + ': ' + entry.message)
+                      .join(' · '),
+                ),
+              )
+            : null,
           h(
             'div',
             { className: 'hpx-seg', role: 'tablist', 'aria-label': TEXT.tabsLabel },
@@ -2370,12 +2389,50 @@ window.__ModuleLoader__.load({
       )
     }
     /* ------------------------------------------------------------------ */
+    /* Boot safety net                                                     */
+    /* ------------------------------------------------------------------ */
+
+    /* A throw inside `apply` or a slot-inject callback keeps this client entry
+       from activating, and the desktop's web boot then fails the WHOLE app into
+       safe mode ("1 entry did not activate"). Nothing here is worth that: catch,
+       record, and let the entry activate with whatever registered cleanly. */
+    const bootErrors = []
+
+    function recordBootError(where, error) {
+      try {
+        const record = {
+          where: String(where || 'unknown'),
+          message: String((error && error.message) || error || 'unknown error'),
+          stack: String((error && error.stack) || ''),
+        }
+        bootErrors.push(record)
+        if (typeof window !== 'undefined') window.__HERMES_PLUGIN_HOST_ERRORS__ = bootErrors
+        if (typeof console !== 'undefined' && console.error) {
+          console.error('[hermes-plugin-host] ' + record.where + ' failed:', error)
+        }
+      } catch (ignored) {
+        /* the sink must never throw */
+      }
+      return null
+    }
+
+    function bootErrorsSnapshot() {
+      return bootErrors.slice()
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Plugin                                                             */
     /* ------------------------------------------------------------------ */
 
     return {
-      inject: ['slots', 'layout', 'uiWorkspace'],
+      /* HARD dependencies only. A client entry whose injected service never
+         arrives stays in `loading` forever, and the desktop's web boot treats
+         that as a fatal "entry did not activate" (safe mode). `uiWorkspace` and
+         `theme` are therefore resolved optionally in `apply` instead — the
+         plugin degrades to Open-without-switch rather than blocking boot. */
+      inject: ['slots', 'layout'],
       apply(ctx) {
+        try {
         const layout = ctx.layout || (typeof ctx.get === 'function' ? ctx.get('layout') : undefined)
         const uiWorkspace = ctx.uiWorkspace || (typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined)
         const themeService = ctx.theme || (typeof ctx.get === 'function' ? ctx.get('theme') : undefined)
@@ -2404,13 +2461,37 @@ window.__ModuleLoader__.load({
            well, so a crash shows its message instead of a blank panel. */
         const guarded = (element) => h(PluginErrorBoundary, {}, element)
 
+        /* `slots.inject` throws synchronously when the callback throws, which
+           would abort `apply` and lose every later registration (and, worse,
+           block boot). Contain it per slot. */
+        const safeInject = (slotName, callback) => {
+          try {
+            ctx.slots.inject(slotName, () => {
+              try {
+                return callback()
+              } catch (error) {
+                recordBootError('inject:' + slotName, error)
+                return () => {}
+              }
+            })
+          } catch (error) {
+            recordBootError('inject:' + slotName, error)
+          }
+        }
+
         /* Prime the store; the inject callbacks below register from its snapshot
-           and re-register on every change, so panels appear without a reload. */
-        pluginStore.refresh()
+           and re-register on every change, so panels appear without a reload.
+           Deferred on purpose: activation must not depend on a network round trip
+           that may itself be waiting for the web server to finish booting. */
+        try {
+          Promise.resolve().then(() => pluginStore.refresh()).catch((error) => recordBootError('store.refresh', error))
+        } catch (error) {
+          recordBootError('store.refresh', error)
+        }
 
         /* One effect owns every `main` registration: the management page plus one
            lazy panel per installed plugin that has a desktop half. */
-        ctx.slots.inject('main', () => {
+        safeInject('main', () => {
           const registered = new Map()
           const register = (item) =>
             ctx.slots.register(
@@ -2448,7 +2529,7 @@ window.__ModuleLoader__.load({
 
         /* Same for the sidebar: management entry (order 30) plus one coloured
            icon per installed desktop plugin (orders 40, 41, ...). */
-        ctx.slots.inject('sidebar.panellist', () => {
+        safeInject('sidebar.panellist', () => {
           const registered = new Map()
           const register = (item) =>
             ctx.slots.register(
@@ -2488,6 +2569,9 @@ window.__ModuleLoader__.load({
           })
         } catch (error) {
           /* ctx.effect absent in older harness builds: nothing to own here. */
+        }
+        } catch (error) {
+          recordBootError('apply', error)
         }
       },
     }

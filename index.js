@@ -112,6 +112,19 @@ async function readPackageVersion() {
  * @param config - this row's config; `storeDir` overrides the registry location.
  */
 export function apply(ctx, config) {
+  /* A throw here leaves this row unactivated, and the desktop's web boot treats
+     an unactivated profile bundle as fatal (safe mode). Contain everything: a
+     broken optional service or a bad persisted file must degrade the plugin,
+     never take the app down. */
+  try {
+    return applyInner(ctx, config)
+  } catch (error) {
+    log('activation failed; the plugin is inactive for this session:', error?.message ?? error)
+    return undefined
+  }
+}
+
+function applyInner(ctx, config) {
   const startedAt = Date.now()
   const store = resolveStoreDir(config ?? {})
   const backend = createBackendManager({ log })
