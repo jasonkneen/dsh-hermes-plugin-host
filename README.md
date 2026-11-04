@@ -31,13 +31,53 @@ them**.
 
 ## Install
 
+A bundle, not a library: install it into a Harness profile and it adds a **Hermes
+Plugins** page plus one sidebar panel per installed Hermes plugin.
+
+**From GitHub** (recommended while the package is unpublished):
+
 ```
-plugin_manager install_bundle @local/hermes-plugin-host
+plugin_manager install_bundle target="git+https://github.com/jasonkneen/dsh-hermes-plugin-host"
 ```
 
-Then open **Hermes Plugins** in the sidebar, paste
-`/Users/you/Documents/GitHub/hermes-desktop-plugin-office-3d`, and press Install,
-then Run.
+or from a shell, for a named profile:
+
+```
+dsh plugin --profile desktop add git+https://github.com/jasonkneen/dsh-hermes-plugin-host
+```
+
+**From a release tarball**: attach the `npm pack` output to a GitHub release and
+pass its path or URL to `install_bundle` as `target`.
+
+**From a local checkout** (development): pass the absolute directory; the profile
+gets a `link:` dependency, so edits apply without reinstalling.
+
+Installing enables the bundle by default. Then open **Hermes Plugins** in the
+sidebar and install a Hermes plugin, for example
+`/Users/you/Documents/GitHub/hermes-desktop-plugin-office-3d`, and press Install.
+
+## Compatibility
+
+`engines.dsh` declares `>=0.2.1-rc.5`; the package manager checks it before a
+registry or path install and reports `incompatible-version` instead of loading a
+bundle that cannot work. For a git or tarball install the same check runs after
+download, and the profile is restored if it refuses. A deliberate override is
+`plugin_manager` `set_version_exemption` (`--accept-risk`).
+
+## Packaging
+
+No build step and no runtime dependencies: plain ESM plus static assets.
+
+```
+npm pack --dry-run     # inspect exactly what ships
+npm pack               # dsh-hermes-plugin-host-1.0.0.tgz
+```
+
+Layout that matters to the Loader: `index.js` (Host row, `apply(ctx, config)`),
+`cordis.patch.yml` (`dsh.bundle.patch` — its row `name` must equal the package
+name), `client.js` (browser half; its `__ModuleLoader__.load({ id })` must also
+equal the package name), `web/**` (served to the browser at runtime, so it must
+ship), `locale/*.json` and `icon.svg` (Plugin Manager display metadata).
 
 ## Layout
 

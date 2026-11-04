@@ -2,4 +2,4 @@
 # declared by this package's `dsh.client` block.
 - insert:
     - id: hermes-plugin-host
-      name: '@local/hermes-plugin-host'
+      name: 'dsh-hermes-plugin-host'

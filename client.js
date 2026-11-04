@@ -27,7 +27,7 @@
  * verified Client locale service contract to route them through.
  */
 window.__ModuleLoader__.load({
-  id: '@local/hermes-plugin-host',
+  id: 'dsh-hermes-plugin-host',
   factory(require) {
     const React = require('react')
     const h = React.createElement

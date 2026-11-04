@@ -4,7 +4,7 @@ A DeepSeek Harness (DSH) plugin that **installs and runs Hermes Desktop plugins*
 (the `hermes-desktop-plugin-*` family, e.g. `office-3d`) inside the DSH Web UI.
 
 Package dir: `/Users/jkneen/Documents/GitHub/dsh-hermes-plugin-host`
-Bundle id / package name: `@local/hermes-plugin-host`
+Bundle id / package name: `dsh-hermes-plugin-host`
 Runtime rows id: `hermes-plugin-host`
 
 ## What a Hermes plugin is
@@ -45,8 +45,8 @@ Do not edit files outside your scope. `lib/**` is host-only ESM. `client.js` and
 ## Studio layout
 
 ```
-package.json          # name @local/hermes-plugin-host, dsh.bundle.patch, dsh.client
-cordis.patch.yml      # inserts row id: hermes-plugin-host, name: '@local/hermes-plugin-host'
+package.json          # name dsh-hermes-plugin-host, dsh.bundle.patch, dsh.client
+cordis.patch.yml      # inserts row id: hermes-plugin-host, name: 'dsh-hermes-plugin-host'
 index.js              # Host: export function apply(ctx, config)
 lib/registry.js       # scan / install / remove hermes plugin dirs
 lib/routes.js         # HTTP routes (contract A below)
@@ -173,7 +173,7 @@ never throw.
 ## D. Client page (client-dev)
 
 `client.js` is a **classic** script body inside
-`window.__ModuleLoader__.load({ id: '@local/hermes-plugin-host', factory(require) {...} })`.
+`window.__ModuleLoader__.load({ id: 'dsh-hermes-plugin-host', factory(require) {...} })`.
 Inside the factory:
 
 1. `const React = require('react')`.

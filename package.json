@@ -1,7 +1,6 @@
 {
-  "name": "@local/hermes-plugin-host",
+  "name": "dsh-hermes-plugin-host",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "description": "Install and run Hermes Desktop plugins inside DeepSeek Harness: a Hermes Plugins page, an @hermes/plugin-sdk runtime, and a Python FastAPI sidecar for plugin backends.",
   "exports": {
@@ -18,8 +17,8 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
-    "README.md",
-    "CONTRACT.md"
+    "LICENSE",
+    "README.md"
   ],
   "dsh": {
     "bundle": {
@@ -28,5 +27,25 @@
     "client": {
       "platform": "web"
     }
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "hermes",
+    "hermes-plugin",
+    "plugin-host",
+    "office-3d"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jasonkneen/dsh-hermes-plugin-host.git"
+  },
+  "homepage": "https://github.com/jasonkneen/dsh-hermes-plugin-host#readme",
+  "bugs": {
+    "url": "https://github.com/jasonkneen/dsh-hermes-plugin-host/issues"
   }
 }
