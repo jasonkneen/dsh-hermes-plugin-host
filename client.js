@@ -785,8 +785,9 @@ window.__ModuleLoader__.load({
   white-space:nowrap;max-width:100%}
 .hpx-page button:focus-visible,.hpx-page input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);
   outline-offset:2px}
-.hpx-panel-page{display:flex;flex-direction:column;height:100%;min-height:100%;background:var(--dsw-alias-bg-base);
-  color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:1.45}
+.hpx-panel-page{position:relative;display:flex;flex-direction:column;height:100%;min-height:440px;min-width:0;
+  overflow:hidden;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);
+  font-family:inherit;font-size:13px;line-height:1.45}
 .hpx-panel-page *{box-sizing:border-box}
 .hpx-panel-body{flex:1 1 auto;min-height:0;height:100%;display:flex;flex-direction:column}
 .hpx-panel-body > .hph-root{flex:1 1 auto;min-height:0;height:auto !important;display:flex;flex-direction:column}
